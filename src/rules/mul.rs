@@ -9,8 +9,8 @@ pub fn mul() -> Vec<Rewrite> {
         rw!("mul-assoc"     ; "(* ?a (* ?b ?c))"            => "(* (* ?a ?b) ?c)"),
         rw!("mul-zero"      ; "(* ?a 0)"                    => "0"),
         rw!("mul-one"       ; "(* ?a 1)"                    => "?a"),
-        rw!("mul-cancel-div"; "(* (/ ?a ?b) ?b)"            => "(- ?a (% ?a ?b))"),
+        rw!("mul-cancel-div"; "(* (/ ?a ?b) ?b)"            => "(- ?a (% ?a ?b))" if crate::trs::is_not_zero("?b")),
         rw!("mul-max-min"   ; "(* (max ?a ?b) (min ?a ?b))" => "(* ?a ?b)"),
-        rw!("div-cancel-mul"; "(/ (* ?y ?x) ?x)"            => "?y"),
+        rw!("div-cancel-mul"; "(/ (* ?y ?x) ?x)"            => "?y" if crate::trs::is_not_zero("?x")),
     ]
 }
