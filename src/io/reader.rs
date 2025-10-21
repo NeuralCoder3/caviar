@@ -21,8 +21,18 @@ pub fn read_expressions(file_path: &OsString) -> Result<Vec<ExpressionStruct>, B
         let index: i32 = record[0].parse::<i32>().unwrap();
         let expression = &record[1];
         // Check if Halide's resluts are included then add them if they are
-        let halide_result = &record[2];
-        let halide_time = record[3].parse::<f64>().unwrap();
+        // let halide_result = &record[2];
+        // let halide_time = record[3].parse::<f64>().unwrap();
+        let halide_result = if record.len() > 2 {
+            &record[2]
+        } else {
+            ""
+        };
+        let halide_time = if record.len() > 3 {
+            record[3].parse::<f64>().unwrap()
+        } else {
+            0.0
+        };
         // Push the new ExpressionStruct initialized with the values extracted into the vector.
         expressions_vect.push(ExpressionStruct::new(
             index,
