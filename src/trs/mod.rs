@@ -6,6 +6,7 @@ use std::{cmp::Ordering, time::Instant};
 use colored::*;
 use egg::*;
 
+use crate::rules::redundant;
 use crate::structs::{ResultStructure, Rule};
 
 // Defining aliases to reduce code.
@@ -261,6 +262,7 @@ pub fn filtered_rules(class: &json::JsonValue) -> Result<Vec<Rewrite>, Box<dyn E
     let not_rules = crate::rules::not::not();
     let or_rules = crate::rules::or::or();
     let sub_rules = crate::rules::sub::sub();
+    let redundant_rules = crate::rules::redundant::rules();
 
     let all_rules: Vec<Rewrite> = [
         &add_rules[..],
@@ -277,6 +279,7 @@ pub fn filtered_rules(class: &json::JsonValue) -> Result<Vec<Rewrite>, Box<dyn E
         &not_rules[..],
         &or_rules[..],
         &sub_rules[..],
+        &redundant_rules[..],
     ]
     .concat();
     let rules_iter = all_rules.into_iter();
@@ -301,6 +304,7 @@ pub fn rules(ruleset_class: i8) -> Vec<Rewrite> {
     let not_rules = crate::rules::not::not();
     let or_rules = crate::rules::or::or();
     let sub_rules = crate::rules::sub::sub();
+    let redundant_rules = crate::rules::redundant::rules();
 
     return match ruleset_class {
         // Class that only contains arithmetic operations' rules
@@ -311,6 +315,7 @@ pub fn rules(ruleset_class: i8) -> Vec<Rewrite> {
                 &modulo_rules[..],
                 &mul_rules[..],
                 &sub_rules[..],
+                &redundant_rules[..],
             ].concat(),
         //All the rules
         _ => [
@@ -328,6 +333,7 @@ pub fn rules(ruleset_class: i8) -> Vec<Rewrite> {
             &not_rules[..],
             &or_rules[..],
             &sub_rules[..],
+            &redundant_rules[..],
         ].concat()
     };
 }
