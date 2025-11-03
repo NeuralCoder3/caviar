@@ -5,7 +5,7 @@ pub type Rewrite = egg::Rewrite<Math, ConstantFold>;
 pub fn sub() -> Vec<Rewrite> {
     vec![
         // SUB RULES
-        rw!("sub-to-add"; "(- ?a ?b)"   => "(+ ?a (* -1 ?b))"),
-        // rw!("add-to-sub"; "(+ ?a ?b)"   => "(- ?a (* -1 ?b))"),
+        rw!("sub-to-add"; "(- ?a ?b)"   => "(+ ?a (* numneg1 ?b))"),
+        // rw!("add-to-sub"; "(+ ?a ?b)"   => "(- ?a (* numneg1 ?b))"),
     ]
 }

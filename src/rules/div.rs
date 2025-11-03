@@ -5,12 +5,12 @@ pub type Rewrite = egg::Rewrite<Math, ConstantFold>;
 pub fn div() -> Vec<Rewrite> {
     vec![
         //DIV RULES
-        rw!("div-zero"      ; "(/ 0 ?x)"            => "(0)" if crate::trs::is_not_zero("?x")),
+        rw!("div-zero"      ; "(/ num0 ?x)"            => "(0)" if crate::trs::is_not_zero("?x")),
         rw!("div-cancel"    ; "(/ ?a ?a)"           => "1" if crate::trs::is_not_zero("?a")),
-        rw!("div-minus-down"; "(/ (* -1 ?a) ?b)"    => "(/ ?a (* -1 ?b))" if crate::trs::is_not_zero("?b")),
-        rw!("div-minus-up"  ; "(/ ?a (* -1 ?b))"    => "(/ (* -1 ?a) ?b)" if crate::trs::is_not_zero("?b")),
-        rw!("div-minus-in"  ; "(* -1 (/ ?a ?b))"    => "(/ (* -1 ?a) ?b)" if crate::trs::is_not_zero("?b")),
-        rw!("div-minus-out" ; "(/ (* -1 ?a) ?b)"    => "(* -1 (/ ?a ?b))" if crate::trs::is_not_zero("?b")),
+        rw!("div-minus-down"; "(/ (* numneg1 ?a) ?b)"    => "(/ ?a (* numneg1 ?b))" if crate::trs::is_not_zero("?b")),
+        rw!("div-minus-up"  ; "(/ ?a (* numneg1 ?b))"    => "(/ (* numneg1 ?a) ?b)" if crate::trs::is_not_zero("?b")),
+        rw!("div-minus-in"  ; "(* numneg1 (/ ?a ?b))"    => "(/ (* numneg1 ?a) ?b)" if crate::trs::is_not_zero("?b")),
+        rw!("div-minus-out" ; "(/ (* numneg1 ?a) ?b)"    => "(* numneg1 (/ ?a ?b))" if crate::trs::is_not_zero("?b")),
         //FOLD
         rw!("div-consts-div"; "( / ( * ?x ?a ) ?b )" => "( / ?x ( / ?b ?a ) )" if crate::trs::compare_c0_c1("?b", "?a", "%0<0")),
         rw!("div-consts-mul"; "( / ( * ?x ?a ) ?b )" => "( * ?x ( / ?a ?b ) )" if crate::trs::compare_c0_c1("?a", "?b", "%0<")),

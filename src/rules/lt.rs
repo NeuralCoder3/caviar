@@ -6,13 +6,13 @@ pub fn lt() -> Vec<Rewrite> {
     vec![
         // LT RULES
         rw!("gt-to-lt"      ;  "(> ?x ?z)"              => "(< ?z ?x)"),
-        rw!("lt-swap"      ;  "(< ?x ?y)"              => "(< (* -1 ?y) (* -1 ?x))"),
+        rw!("lt-swap"      ;  "(< ?x ?y)"              => "(< (* numneg1 ?y) (* numneg1 ?x))"),
         rw!("lt-to-zero"    ;  "(< ?a ?a)"              => "0"),
         rw!("lt-swap-in"    ;  "(< (+ ?x ?y) ?z)"       => "(< ?x (- ?z ?y))" ),
         rw!("lt-swap-out"   ;  "(< ?z (+ ?x ?y))"       => "(< (- ?z ?y) ?x)" ),
         rw!("lt-x-x-sub-a"  ;  "(< (- ?a ?y) ?a )"      => "1" if crate::trs::is_const_pos("?y")),
-        rw!("lt-const-pos"  ;  "(< 0 ?y )"              => "1" if crate::trs::is_const_pos("?y")),
-        rw!("lt-const-neg"  ;  "(< ?y 0 )"              => "1" if crate::trs::is_const_neg("?y")),
+        rw!("lt-const-pos"  ;  "(< num0 ?y )"              => "1" if crate::trs::is_const_pos("?y")),
+        rw!("lt-const-neg"  ;  "(< ?y num0 )"              => "1" if crate::trs::is_const_neg("?y")),
         rw!("min-lt-cancel" ;  "( < ( min ?x ?y ) ?x )" => "( < ?y ?x )"),
         rw!("lt-min-mutual-term"    ; "( < ( min ?z ?y ) ( min ?x ?y ) )"           => "( < ?z ( min ?x ?y ) )"),
         rw!("lt-max-mutual-term"    ; "( < ( max ?z ?y ) ( max ?x ?y ) )"           => "( < ( max ?z ?y ) ?x )"),
@@ -28,7 +28,7 @@ pub fn lt() -> Vec<Rewrite> {
         rw!("lt-const-mod-false"     ; "(< ?a (% ?x ?b))" => "0"  if crate::trs::compare_c0_c1("?a", "?b", ">=a")),
 
         // INCONSISTENT
-        // rw!("lt-mul-pos-cancel"     ; "(< (* ?x ?y) ?z)"                            => "(< ?x ( / (- ( + ?z ?y ) 1 ) ?y ) )"  if crate::trs::is_const_pos("?y")),
-        // rw!("lt-mul-div-cancel"     ; "(< ?y (/ ?x ?z))"                            => "( < ( - ( * ( + ?y 1 ) ?z ) 1 ) ?x )"  if crate::trs::is_const_pos("?z")),
+        // rw!("lt-mul-pos-cancel"     ; "(< (* ?x ?y) ?z)"                            => "(< ?x ( / (- ( + ?z ?y ) num1 ) ?y ) )"  if crate::trs::is_const_pos("?y")),
+        // rw!("lt-mul-div-cancel"     ; "(< ?y (/ ?x ?z))"                            => "( < ( - ( * ( + ?y num1 ) ?z ) num1 ) ?x )"  if crate::trs::is_const_pos("?z")),
     ]
 }

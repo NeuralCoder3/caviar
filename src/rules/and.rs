@@ -7,7 +7,7 @@ pub fn and() -> Vec<Rewrite> {
         // AND RULES
         rw!("and-comm"          ;  "(&& ?y ?x)"                         => "(&& ?x ?y)"),
         rw!("and-assoc"         ;  "(&& ?a (&& ?b ?c))"                 => "(&& (&& ?a ?b) ?c)"),
-        rw!("and-x-1"           ;  "(&& 1 ?x)"                          => "?x"),
+        rw!("and-x-1"           ;  "(&& num1 ?x)"                          => "?x"),
         rw!("and-x-x"           ;  "(&& ?x ?x)"                         => "?x"),
         rw!("and-x-not-x"       ;  "(&& ?x (! ?x))"                     => "0"),
         rw!("and-eq-eq"         ;  "( && ( == ?x ?c0 ) ( == ?x ?c1 ) )" => "0" if crate::trs::compare_c0_c1("?c1", "?c0", "!=")),
