@@ -26,7 +26,6 @@ pub fn min() -> Vec<Rewrite> {
         rw!("min-div-in-neg"    ; "(/ (max ?x ?y) ?z)"               => "(min (/ ?x ?z) (/ ?y ?z))"  if crate::trs::is_const_neg("?z")),
         rw!("min-div-out-neg"   ; "(min (/ ?x ?z) (/ ?y ?z))"        => "(/ (max ?x ?y) ?z)" if crate::trs::is_const_neg("?z")),
         rw!("min-max-const"     ; "( min ( max ?x ?c0 ) ?c1 )"       => "?c1" if crate::trs::compare_c0_c1("?c1","?c0","<=")),
-        rw!("min-div-mul"               ; "( min ( * ( / ?x ?c0 ) ?c0 ) ?x )"    => "( * ( / ?x ?c0 ) ?c0 )" if  crate::trs::is_const_pos("?c0")),
         rw!("min-mod-const-to-mod"      ; "(min (% ?x ?c0) ?c1)"                         => "(% ?x ?c0)" if crate::trs::compare_c0_c1("?c1","?c0",">=a-1")),
         rw!("min-mod-const-to-const"    ; "(min (% ?x ?c0) ?c1)" => "?c1" if crate::trs::compare_c0_c1("?c1","?c0","<=-a+1")), // c1 <= - |c0| + 1
         rw!("min-max-switch"            ; "( min ( max ?x ?c0 ) ?c1 )" => "( max ( min ?x ?c1 ) ?c0 )" if crate::trs::compare_c0_c1("?c0","?c1","<=") ),
@@ -39,5 +38,8 @@ pub fn min() -> Vec<Rewrite> {
         rw!("min-min-div-pos"        ; "( min ( * ?x ?a ) ( * ?y ?b ) )" => "( * ( min ?x ( * ?y ( / ?b ?a ) ) ) ?a )" if crate::trs::compare_c0_c1("?b", "?a", "%0<") ),  
         rw!("min-consts-div-neg"     ; "( min ( * ?x ?a ) ?b )" => "( * ( max ?x ( / ?b ?a ) ) ?a )" if crate::trs::compare_c0_c1("?b", "?a", "%0>") ),  
         rw!("min-min-div-neg"        ; "( min ( * ?x ?a ) ( * ?y ?b ) )" => "( * ( max ?x ( * ?y ( / ?b ?a ) ) ) ?a )" if crate::trs::compare_c0_c1("?b", "?a", "%0>") ), 
+
+        // INCONSISTENT
+        // rw!("min-div-mul"               ; "( min ( * ( / ?x ?c0 ) ?c0 ) ?x )"    => "( * ( / ?x ?c0 ) ?c0 )" if  crate::trs::is_const_pos("?c0")),
     ]
 }

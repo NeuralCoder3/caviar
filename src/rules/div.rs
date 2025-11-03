@@ -14,7 +14,10 @@ pub fn div() -> Vec<Rewrite> {
         //FOLD
         rw!("div-consts-div"; "( / ( * ?x ?a ) ?b )" => "( / ?x ( / ?b ?a ) )" if crate::trs::compare_c0_c1("?b", "?a", "%0<0")),
         rw!("div-consts-mul"; "( / ( * ?x ?a ) ?b )" => "( * ?x ( / ?a ?b ) )" if crate::trs::compare_c0_c1("?a", "?b", "%0<")),
-        rw!("div-consts-add"; "( / ( + ( * ?x ?a ) ?y ) ?b )" => "( + ( * ?x ( / ?a ?b ) ) ( / ?y ?b ) )" if crate::trs::compare_c0_c1("?a", "?b", "%0<")),
-        rw!("div-separate"  ; "( / ( + ?x ?a ) ?b )" => "( + ( / ?x ?b ) ( / ?a ?b ) )" if crate::trs::compare_c0_c1("?a", "?b", "%0<")),
+
+
+        // INCONSISTENT
+        // rw!("div-consts-add"; "( / ( + ( * ?x ?a ) ?y ) ?b )" => "( + ( * ?x ( / ?a ?b ) ) ( / ?y ?b ) )" if crate::trs::compare_c0_c1("?a", "?b", "%0<")),
+        // rw!("div-separate"  ; "( / ( + ?x ?a ) ?b )" => "( + ( / ?x ?b ) ( / ?a ?b ) )" if crate::trs::compare_c0_c1("?a", "?b", "%0<")),
     ]
 }
