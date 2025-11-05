@@ -9,6 +9,7 @@ pub fn div() -> Vec<Rewrite> {
         rw!("div-cancel"    ; "(/ ?a ?a)"           => "1" if crate::trs::is_not_zero("?a")),
         rw!("div-minus-down"; "(/ (* -1 ?a) ?b)"    => "(/ ?a (* -1 ?b))" if crate::trs::is_not_zero("?b")),
         rw!("div-minus-up"  ; "(/ ?a (* -1 ?b))"    => "(/ (* -1 ?a) ?b)" if crate::trs::is_not_zero("?b")),
+
         rw!("div-minus-in"  ; "(* -1 (/ ?a ?b))"    => "(/ (* -1 ?a) ?b)" if crate::trs::is_not_zero("?b")),
         rw!("div-minus-out" ; "(/ (* -1 ?a) ?b)"    => "(* -1 (/ ?a ?b))" if crate::trs::is_not_zero("?b")),
         //FOLD

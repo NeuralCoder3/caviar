@@ -6,7 +6,7 @@ pub fn lt() -> Vec<Rewrite> {
     vec![
         // LT RULES
         rw!("gt-to-lt"      ;  "(> ?x ?z)"              => "(< ?z ?x)"),
-        rw!("lt-swap"      ;  "(< ?x ?y)"              => "(< (* -1 ?y) (* -1 ?x))"),
+        rw!("lt-swap"      ;   "(< (* -1 ?y) (* -1 ?x))" => "(< ?x ?y)"),
         rw!("lt-to-zero"    ;  "(< ?a ?a)"              => "0"),
         rw!("lt-swap-in"    ;  "(< (+ ?x ?y) ?z)"       => "(< ?x (- ?z ?y))" ),
         rw!("lt-swap-out"   ;  "(< ?z (+ ?x ?y))"       => "(< (- ?z ?y) ?x)" ),
