@@ -5,8 +5,8 @@ pub type Rewrite = egg::Rewrite<Math, ConstantFold>;
 pub fn div() -> Vec<Rewrite> {
     vec![
         //DIV RULES
-        rw!("div-zero"      ; "(/ num0 ?x)"            => "(0)" if crate::trs::is_not_zero("?x")),
-        rw!("div-cancel"    ; "(/ ?a ?a)"           => "1" if crate::trs::is_not_zero("?a")),
+        rw!("div-zero"      ; "(/ num0 ?x)"            => "(num0)" if crate::trs::is_not_zero("?x")),
+        rw!("div-cancel"    ; "(/ ?a ?a)"           => "num1" if crate::trs::is_not_zero("?a")),
         rw!("div-minus-down"; "(/ (* numneg1 ?a) ?b)"    => "(/ ?a (* numneg1 ?b))" if crate::trs::is_not_zero("?b")),
         rw!("div-minus-up"  ; "(/ ?a (* numneg1 ?b))"    => "(/ (* numneg1 ?a) ?b)" if crate::trs::is_not_zero("?b")),
         rw!("div-minus-in"  ; "(* numneg1 (/ ?a ?b))"    => "(/ (* numneg1 ?a) ?b)" if crate::trs::is_not_zero("?b")),

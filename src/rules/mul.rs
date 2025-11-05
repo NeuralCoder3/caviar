@@ -7,7 +7,7 @@ pub fn mul() -> Vec<Rewrite> {
         //MUL RULES
         rw!("mul-comm"      ; "(* ?a ?b)"                   => "(* ?b ?a)"),
         rw!("mul-assoc"     ; "(* ?a (* ?b ?c))"            => "(* (* ?a ?b) ?c)"),
-        rw!("mul-zero"      ; "(* ?a num0)"                    => "0"),
+        rw!("mul-zero"      ; "(* ?a num0)"                    => "num0"),
         rw!("mul-one"       ; "(* ?a num1)"                    => "?a"),
         rw!("mul-cancel-div"; "(* (/ ?a ?b) ?b)"            => "(- ?a (% ?a ?b))" if crate::trs::is_not_zero("?b")),
         rw!("mul-max-min"   ; "(* (max ?a ?b) (min ?a ?b))" => "(* ?a ?b)"),
