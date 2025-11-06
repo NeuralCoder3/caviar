@@ -12,6 +12,6 @@ pub fn not() -> Vec<Rewrite> {
         rw!("not-eq-to-ineq";  "(! (== ?x ?y))" => "(!= ?x ?y)" ),
         rw!("not-eq-to-ineq2"; "(!= ?x ?y)" => "(! (== ?x ?y))" ),
         rw!("not-not"       ;  "(! (! ?x))"     => "?x" ),
-        rw!("not-not2"       ; "?x" => "(! (! ?x))" ),
+        // rw!("not-not2"       ; "?x" => "(! (! ?x))" ),
     ]
 }
