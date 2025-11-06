@@ -9,7 +9,7 @@ pub fn add() -> Vec<Rewrite> {
         rw!("add-assoc"     ; "(+ ?a (+ ?b ?c))"            => "(+ (+ ?a ?b) ?c)"),
         rw!("add-assoc2"     ; "(+ (+ ?a ?b) ?c)" => "(+ ?a (+ ?b ?c))"),
         rw!("add-zero"      ; "(+ ?a 0)"                    => "?a"),
-        // rw!("add-zero2"      ; "?a" => "(+ ?a 0)"),
+        rw!("add-zero2"      ; "?a" => "(+ ?a 0)"),
         rw!("add-dist-mul"  ; "(* ?a (+ ?b ?c))"            => "(+ (* ?a ?b) (* ?a ?c))"),
         rw!("add-fact-mul"  ; "(+ (* ?a ?b) (* ?a ?c))"     => "(* ?a (+ ?b ?c))"),
         //FOLD

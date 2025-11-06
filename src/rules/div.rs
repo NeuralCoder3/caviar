@@ -13,9 +13,9 @@ pub fn div() -> Vec<Rewrite> {
         rw!("div-minus-out" ; "(/ (* -1 ?a) ?b)"    => "(* -1 (/ ?a ?b))" if crate::trs::is_not_zero("?b")),
         //FOLD
         rw!("div-consts-div"; "( / ( * ?x ?a ) ?b )" => "( / ?x ( / ?b ?a ) )" if crate::trs::compare_c0_c1("?b", "?a", "%0<0")),
-        // rw!("div-consts-div2";"( / ?x ( / ?b ?a ) )" => "( / ( * ?x ?a ) ?b )" if crate::trs::compare_c0_c1("?b", "?a", "%0<0")),
+        rw!("div-consts-div2";"( / ?x ( / ?b ?a ) )" => "( / ( * ?x ?a ) ?b )" if crate::trs::compare_c0_c1("?b", "?a", "%0<0")),
         rw!("div-consts-mul"; "( / ( * ?x ?a ) ?b )" => "( * ?x ( / ?a ?b ) )" if crate::trs::compare_c0_c1("?a", "?b", "%0<")),
-        // rw!("div-consts-mul2"; "( * ?x ( / ?a ?b ) )" => "( / ( * ?x ?a ) ?b )" if crate::trs::compare_c0_c1("?a", "?b", "%0<")),
+        rw!("div-consts-mul2"; "( * ?x ( / ?a ?b ) )" => "( / ( * ?x ?a ) ?b )" if crate::trs::compare_c0_c1("?a", "?b", "%0<")),
 
 
         // INCONSISTENT
