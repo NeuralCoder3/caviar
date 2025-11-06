@@ -6,5 +6,6 @@ pub fn ineq() -> Vec<Rewrite> {
     vec![
         // Inequality RULES
         rw!("ineq-to-eq";  "(!= ?x ?y)"        => "(! (== ?x ?y))"),
+        rw!("ineq-to-eq2"; "(! (== ?x ?y))" => "(!= ?x ?y)"),
     ]
 }

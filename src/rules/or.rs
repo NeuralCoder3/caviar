@@ -6,6 +6,7 @@ pub fn or() -> Vec<Rewrite> {
     vec![
         // OR RULES
         rw!("or-to-and" ;"(|| ?x ?y)"        => "(! (&& (! ?x) (! ?y)))"),
+        rw!("or-to-and2" ; "(! (&& (! ?x) (! ?y)))" => "(|| ?x ?y)"),
         rw!("or-comm"   ;"(|| ?y ?x)"        => "(|| ?x ?y)"),
     ]
 }
