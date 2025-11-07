@@ -199,6 +199,61 @@ pub fn is_not_zero(var: &str) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
     move |egraph, _, subst| !egraph[subst[var]].nodes.contains(&zero)
 }
 
+
+// example
+// if crate::trs::guard(vec![("%0",vec!["?b"])])
+// %!=0 := a % b != 0
+// >a := a > abs(b)
+//
+// >0 := a > 0
+// !=0 := a != 0
+// =0 := a == 0
+pub fn guard(
+    checks: Vec<(&'static str, Vec<&str>)>,
+) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
+    let checks = checks
+        .into_iter()
+        .map(|(comp, vars)| {
+            let vars_parsed: Vec<Var> = vars.into_iter().map(|v| v.parse().unwrap()).collect();
+            (comp, vars_parsed)
+        })
+        .collect::<Vec<(&'static str, Vec<Var>)>>();
+    move |egraph, _, subst| {
+        checks.iter().all(|(comp, vars)| {
+            match vars.as_slice() {
+                [var1, var2] => 
+                    egraph[subst[*var1]].nodes.iter().any(|n1| match n1 {
+                        // Get the eclass of the second constant then match it to c1
+                        Math::Constant(a) => egraph[subst[*var2]].nodes.iter().any(|n| match n {
+                            // match the comparison then do it
+                            Math::Constant(b) => match comp.as_ref() {
+                                ">a" => a > &b.abs(),
+                                "%!=0" => (*b != 0) && (a % b != 0),
+                                _ => false,
+                            },
+                            _ => return false,
+                        }),
+                        _ => return false,
+                    }
+                ),
+                [var] => 
+                    egraph[subst[*var]].nodes.iter().any(|n| match n {
+                        Math::Constant(a) => match comp.as_ref() {
+                            ">0" => a > &0,
+                            "!=0" => a != &0,
+                            "=0" => a == &0,
+                            _ => false,
+                        },
+                        _ => false,
+                    }
+                ),
+                _ => false,
+            }
+        })
+    }
+}
+
+
 /// Compares two constants c0 and c1
 pub fn compare_c0_c1(
     // first constant
