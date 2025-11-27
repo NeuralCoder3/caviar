@@ -1,3 +1,17 @@
+TODO: Questions/Tweaking Points
+- CP only between oriented rules
+- resulting CP equation oriented or not
+- Take best term or same term
+- Use finally EGraph or KBC
+- Use reversed rule applications (or use simplifying rule for all expanding rules)
+- start with E instead of oriented rules
+Experiments:
+- https://sonic.cs.uni-saarland.de/xxbcjDidRkW0gM9HlytpEw?view#Experiments-20
+
+
+
+
+
 # Caviar: An E-Graph Based Term Rewriting System for Automatic Code Optimization
 
 The **caviar** paper was accepted at [CC 2022](https://conf.researchr.org/track/CC-2022/CC-2022-research-papers#event-overview)! Check it out: [link](https://dl.acm.org/doi/10.1145/3497776.3517781)
