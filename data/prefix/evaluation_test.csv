@@ -1,0 +1,2 @@
+ID,Expression,HalideResult,HalideTime
+44,( == ( * ( / ( * v0 -12 ) 4 ) 4 ) ( * v0 -12 ) ),1,121

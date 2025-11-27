@@ -1,5 +1,8 @@
 use json::JsonValue;
+use std::collections::HashSet;
 use std::error::Error;
+use std::hash::Hash;
+use std::iter;
 use std::time::Duration;
 use std::{cmp::Ordering, time::Instant};
 
@@ -344,6 +347,7 @@ pub fn print_graph(egraph: &EGraph, name: &str) {
     println!("done printing graph to svg");
 }
 
+
 #[allow(dead_code)]
 /// Prints the most simplified version of the passed expression.
 pub fn simplify(
@@ -353,21 +357,111 @@ pub fn simplify(
     params: (usize, usize, f64),
     report: bool,
 ) -> ResultStructure {
+
+    let iter_count = 2;
+
+
     //Parse the input expression
     let start: RecExpr<Math> = start_expression.parse().unwrap();
+    let rules = rules(ruleset_class);
     //Initialize the runner and run it.
     let runner = Runner::default()
         .with_iter_limit(params.0)
         .with_node_limit(params.1)
-        .with_time_limit(Duration::from_secs_f64(params.2))
+        .with_time_limit(Duration::from_secs_f64(params.2/iter_count as f64))
         .with_expr(&start)
-        .run(rules(ruleset_class).iter());
+        .run(rules.iter());
 
     //Get the ID of the root eclass.
     let id = runner.egraph.find(*runner.roots.last().unwrap());
 
     //Initiate the extractor
     let mut extractor = Extractor::new(&runner.egraph, AstSize);
+
+
+    // let mut applicable = std::collections::HashMap::<Id, Vec<String>>::new();
+
+    // parents: for each eclass a list of classes that reference it
+    let mut parents = std::collections::HashMap::<Id, Vec<Id>>::new();
+    for eclass in runner.egraph.classes().map(|c| c) {
+        for node in &eclass.nodes {
+            node.for_each(|child| {
+                parents
+                    .entry(child)
+                    .or_insert_with(Vec::new)
+                    .push(eclass.id);
+            });
+        }
+    }
+
+
+
+    // propagate upwards, eclass -> application point and rule
+    let mut sub_applicable = std::collections::HashMap::<Id, HashSet<(Id,String)>>::new();
+    for r in rules.iter() {
+        let matches = r.search(&runner.egraph);
+        // eclasses where the rule applies
+        let mut worklist = matches.iter()
+            .map(|m| m.eclass)
+            .map(|id| (id, id)) // (current, source)
+            .collect::<HashSet<_>>();
+        while !worklist.is_empty() {
+            let (current, source) = worklist.iter().next().unwrap().clone();
+            worklist.remove(&(current, source));
+            let entry = sub_applicable
+                .entry(current)
+                .or_insert_with(HashSet::new);
+            if entry.insert((source, r.name().to_string())) {
+                // only continue when freshly inserted => terminate at the latest after every eclass has been visited once
+                if let Some(ps) = parents.get(&current) {
+                    for p in ps {
+                        worklist.insert((*p, source));
+                    }
+                }
+            }
+        }
+    }
+
+    // only propagate up to either other node => intersection only at one of the rules
+    // at class c, get all pairs and take these that have one component be c
+    // find overlaps
+    let mut critical_pairs = HashSet::<(String,String)>::new();
+    for (eclass, apps) in sub_applicable.iter() {
+        let apps_vec = apps.iter().collect::<Vec<_>>();
+        for i in 0..apps_vec.len() {
+            for j in (i + 1)..apps_vec.len() {
+                let (src_i, rule_i) = apps_vec[i];
+                let (src_j, rule_j) = apps_vec[j];
+                if src_i != eclass && src_j != eclass {
+                    continue;
+                }
+                // sorted tuple in critical pairs
+                let pair = if rule_i < rule_j {
+                    (rule_i.clone(), rule_j.clone())
+                } else {
+                    (rule_j.clone(), rule_i.clone())
+                };
+                if critical_pairs.insert(pair) {
+                    println!(
+                        "Overlap found in eclass {}: rules '{}' and '{}' (from eclasses {} and {})",
+                        eclass, rule_i, rule_j, src_i, src_j
+                    );
+                }
+                // println!(
+                //     "Overlap found in eclass {}: rules '{}' and '{}' (from eclasses {} and {})",
+                //     eclass, rule_i, rule_j, src_i, src_j
+                // );
+            }
+        }
+    }
+
+
+
+
+
+
+
+
 
     //Extract the best expression
     let (_, best_expr) = extractor.find_best(id);
