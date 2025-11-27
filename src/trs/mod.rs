@@ -366,7 +366,9 @@ pub fn simplify(
     let mut best_expr: RecExpr<Math> = start_expression.parse().unwrap();
     let mut last_runner= None;
     let rules = rules(ruleset_class);
-    let mut cp_rules = HashSet::<(Term,Term)>::new();
+    let mut cp_rules = HashSet::<(String,Term,Term)>::new();
+    let mut critical_pairs_set = HashSet::<(String,String)>::new();
+    let mut critical_pairs = HashSet::<(String,(Id,String),(Id,String))>::new();
 
     for iter in 0..iter_count {
         // println!("Iteration {}", iter + 1);
@@ -385,7 +387,7 @@ pub fn simplify(
         let mut extractor = Extractor::new(&runner.egraph, AstSize);
 
 
-        let mut applicable = std::collections::HashMap::<Id, Vec<String>>::new();
+        // let mut applicable = std::collections::HashMap::<Id, Vec<String>>::new();
 
         // parents: for each eclass a list of classes that reference it
         let mut parents = std::collections::HashMap::<Id, Vec<Id>>::new();
@@ -435,8 +437,6 @@ pub fn simplify(
         // only propagate up to either other node => intersection only at one of the rules
         // at class c, get all pairs and take these that have one component be c
         // find overlaps
-        let mut critical_pairs_set = HashSet::<(String,String)>::new();
-        let mut critical_pairs = HashSet::<((Id,String),(Id,String))>::new();
         for (eclass, apps) in sub_applicable.iter() {
             let apps_vec = apps.iter().collect::<Vec<_>>();
             for i in 0..apps_vec.len() {
@@ -453,7 +453,8 @@ pub fn simplify(
                         (rule_j.clone(), rule_i.clone())
                     };
                     if critical_pairs_set.insert(pair) {
-                        critical_pairs.insert((( *src_i, rule_i.clone()), (*src_j, rule_j.clone())));
+                        let cp_count = critical_pairs_set.len();
+                        critical_pairs.insert((cp_count.to_string(), (*src_i, rule_i.clone()), (*src_j, rule_j.clone())));
                         println!(
                             "Overlap found in eclass {}: rules '{}' and '{}' (from eclasses {} and {})",
                             eclass, rule_i, rule_j, src_i, src_j
@@ -470,7 +471,7 @@ pub fn simplify(
         // TODO: only critical pair overlap at correct positions not all
         // TODO: only critical pair that were used in e-graph (at node) (custom applier)
 
-        for ((src1, r1), (src2, r2)) in critical_pairs.iter() {
+        for (cp_name,(src1, r1), (src2, r2)) in critical_pairs.iter() {
             let rule1 = rules.iter().find(|r| r.name() == *r1).unwrap();
             let rule2 = rules.iter().find(|r| r.name() == *r2).unwrap();
             let r1 = (&rule1.lhs,&rule1.rhs);
@@ -485,7 +486,7 @@ pub fn simplify(
                     r
                 );
                 // add critical pair as rewrite rule
-                cp_rules.insert((l.clone(), r.clone()));
+                cp_rules.insert((cp_name.clone(), l.clone(), r.clone()));
             }
         }
 
