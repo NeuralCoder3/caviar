@@ -349,6 +349,7 @@ pub fn print_graph(egraph: &EGraph, name: &str) {
 }
 
 
+
 #[allow(dead_code)]
 /// Prints the most simplified version of the passed expression.
 pub fn simplify(
@@ -359,14 +360,14 @@ pub fn simplify(
     report: bool,
 ) -> ResultStructure {
 
-    let iter_count = 1;
+    let iter_count = 4;
 
 
     //Parse the input expression
     let mut best_expr: RecExpr<Math> = start_expression.parse().unwrap();
     let mut last_runner= None;
     let rules = rules(ruleset_class);
-    let mut cp_rules = HashSet::<(String,Term,Term)>::new();
+    let mut cp_rules = Vec::<Rewrite>::new();
     let mut critical_pairs_set = HashSet::<(String,String)>::new();
     let mut critical_pairs = HashSet::<(String,(Id,String),(Id,String))>::new();
 
@@ -376,9 +377,20 @@ pub fn simplify(
         let runner = Runner::default()
             .with_iter_limit(params.0)
             .with_node_limit(params.1)
-            .with_time_limit(Duration::from_secs_f64(params.2/iter_count as f64))
+            .with_time_limit(Duration::from_secs_f64(
+                params.2/iter_count as f64 
+                // // first iteration gets additionally 50% of the time
+                // (params.2/2 as f64)/iter_count as f64 +
+                // if iter == 0 {
+                //     params.2/2 as f64
+                // } else {
+                //     0.0
+                // }
+            ))
             .with_expr(&best_expr)
-            .run(rules.iter());
+            // .with_expr(&start_expression.parse().unwrap())
+            // .run(rules.iter());
+            .run(rules.iter().chain(cp_rules.iter()));
 
         //Get the ID of the root eclass.
         let id = runner.egraph.find(*runner.roots.last().unwrap());
@@ -455,10 +467,10 @@ pub fn simplify(
                     if critical_pairs_set.insert(pair) {
                         let cp_count = critical_pairs_set.len();
                         critical_pairs.insert((cp_count.to_string(), (*src_i, rule_i.clone()), (*src_j, rule_j.clone())));
-                        println!(
-                            "Overlap found in eclass {}: rules '{}' and '{}' (from eclasses {} and {})",
-                            eclass, rule_i, rule_j, src_i, src_j
-                        );
+                        // println!(
+                        //     "Overlap found in eclass {}: rules '{}' and '{}' (from eclasses {} and {})",
+                        //     eclass, rule_i, rule_j, src_i, src_j
+                        // );
                     }
                     // println!(
                     //     "Overlap found in eclass {}: rules '{}' and '{}' (from eclasses {} and {})",
@@ -477,16 +489,32 @@ pub fn simplify(
             let r1 = (&rule1.lhs,&rule1.rhs);
             let r2 = (&rule2.lhs,&rule2.rhs);
             let cps = all_critical_pair_ref(r1, r2);
-            for (l, r) in cps {
-                println!(
-                    "  Critical pair between '({} -> {})' and '({} -> {})': {} = {}",
-                    r1.0,r1.1,
-                    r2.0,r2.1,
-                    l,
-                    r
-                );
+            for (l, r) in cps.iter() {
+                // TODO: not any two if can be unified (same_eq)
+                //   Critical pair between '((* ?a 1) -> ?a)' and '((* ?a ?b) -> (* ?b ?a))': (* 1 ?a_0) = ?a_0
+                //   Critical pair between '((* ?a 1) -> ?a)' and '((* ?a ?b) -> (* ?b ?a))': ?a = (* 1 ?a)
+                // println!(
+                //     "  Critical pair between '({} -> {})' and '({} -> {})': {} = {}",
+                //     r1.0,r1.1,
+                //     r2.0,r2.1,
+                //     l,
+                //     r
+                // );
                 // add critical pair as rewrite rule
-                cp_rules.insert((cp_name.clone(), l.clone(), r.clone()));
+                // consider both direction but only if no new variable are introduced
+                let var_l = vars(l);
+                let var_r = vars(r);
+                fn is_var(t: &Term) -> bool {
+                    matches!(t, Term::Var(_))
+                }
+                if var_r.iter().all(|v| var_l.contains(v)) && !is_var(l) {
+                    // if var_r is subset of var_l 
+                    cp_rules.push(rule_of_cp(cp_name, l, r));
+                }
+                if var_l.iter().all(|v| var_r.contains(v)) && !is_var(r) {
+                    // if var_l is subset of var_r
+                    cp_rules.push(rule_of_cp(cp_name, r, l));
+                }
             }
         }
 
