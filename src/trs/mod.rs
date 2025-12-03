@@ -360,16 +360,21 @@ pub fn simplify(
     report: bool,
 ) -> ResultStructure {
 
-    let iter_count = 2;
+    let iter_count = 4;
 
+    let tryout_node = [params.1/10, params.1];
 
-    //Parse the input expression
     let mut best_expr: RecExpr<Math> = start_expression.parse().unwrap();
     let mut last_runner= None;
+
+    for node_max in tryout_node {
+    //Parse the input expression
     let rules = rules(ruleset_class);
     let mut cp_rules = Vec::<Rewrite>::new();
     let mut critical_pairs_set = HashSet::<(String,String)>::new();
     let mut critical_pairs = HashSet::<(String,(Id,String),(Id,String))>::new();
+
+    // best_expr = start_expression.parse().unwrap();
 
     for iter in 0..iter_count {
         let last_iteration = iter == iter_count -1;
@@ -380,10 +385,12 @@ pub fn simplify(
             .with_node_limit(
                 // except last iteration only 10%
                 if last_iteration || iter==0 {
-                    params.1
+                    // params.1
                     // params.1/10
+                    node_max
                 } else {
-                    params.1/10
+                    // params.1/10
+                    node_max/10
                     // params.1
                 }
             )
@@ -555,18 +562,38 @@ pub fn simplify(
         //         format!("{}", best_expr).bright_green().bold()
         //     );
         // }
+
+        if let Some(StopReason::Saturated) = last_runner.as_ref().unwrap().stop_reason {
+            // println!("Reached saturation, stopping iterations.");
+            break;
+        }
+
     }
+
+    let runner = last_runner.as_ref().unwrap();
+
+    match runner.stop_reason {
+        Some(StopReason::Saturated) => {
+            // println!("Reached saturation, stopping tryouts.");
+            break;
+        }
+        _ => {}
+    }
+
+    }
+    
+    let runner = last_runner.unwrap();
+
     println!(
         "Best Expr: {}",
         format!("{}", best_expr).bright_green().bold()
     );
 
-    let runner = last_runner.unwrap();
-    let total_time: f64 = runner.iterations.iter().map(|i| i.total_time).sum();
     if report {
         runner.print_report();
     }
 
+    let total_time: f64 = runner.iterations.iter().map(|i| i.total_time).sum();
     let stop_reason = match runner.stop_reason.unwrap() {
         StopReason::Saturated => "Saturation".to_string(),
         StopReason::IterationLimit(iter) => format!("Iterations: {}", iter),
@@ -574,7 +601,6 @@ pub fn simplify(
         StopReason::TimeLimit(time) => format!("Time Limit : {}", time),
         StopReason::Other(reason) => reason,
     };
-
     ResultStructure::new(
         index,
         start_expression.to_string(),
