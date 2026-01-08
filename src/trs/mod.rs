@@ -1375,55 +1375,29 @@ pub fn prove_pulses(
     }
 
     let mut i = 0.0;
-    let mut exit = false;
     let mut expr = start;
 
     //Initialize the runner with the limits and the initial expression.
-    let mut runner = Runner::default()
-        .with_iter_limit(params.0)
-        .with_node_limit(params.1)
-        .with_time_limit(Duration::from_secs_f64(threshold))
-        .with_expr(&expr);
+    // let mut runner = Runner::default()
+    //     .with_iter_limit(params.0)
+    //     .with_node_limit(params.1)
+    //     .with_time_limit(Duration::from_secs_f64(threshold))
+    //     .with_expr(&expr);
+    let mut runner;
     // Get the Id of the root eclass containing the initial expression.
-    id = runner.egraph.find(*runner.roots.last().unwrap());
+    // id = runner.egraph.find(*runner.roots.last().unwrap());
     // Run ES on each extracted expression until we reach a limit or we prove the expression.
-    while !exit {
-        if i > 0.0 {
-            //Extract the best expression from the egraph.
-            let mut extractor;
-            extractor = Extractor::new(&((&runner).egraph), AstDepth);
-
-            //Calculate the extraction time.
-            let now = Instant::now();
-            let (_, best_exprr) = extractor.find_best(id);
-            let extraction_time = now.elapsed().as_secs_f64();
-            expr = best_exprr;
-            total_time += extraction_time;
-            if report {
-                println!(
-                    "Starting pass {} with Expr: {} in {}",
-                    i,
-                    format!("{}", expr).bright_green().bold(),
-                    format!("{}", extraction_time).bright_green().bold()
-                );
-            }
-        }
-        //Rerun the ES on the newly extracted expression.
-        if use_iteration_check {
-            runner = Runner::default()
-                .with_iter_limit(params.0)
-                .with_node_limit(params.1)
-                .with_time_limit(Duration::from_secs_f64(threshold))
-                .with_expr(&expr)
-                .run_check_iteration(rules(ruleset_class).iter(), &goals);
+    loop {
+        let runner_builder = Runner::default()
+            .with_iter_limit(params.0)
+            .with_node_limit(params.1)
+            .with_time_limit(Duration::from_secs_f64(threshold))
+            .with_expr(&expr);
+        runner = if use_iteration_check {
+            runner_builder.run_check_iteration(rules(ruleset_class).iter(), &goals)
         } else {
-            runner = Runner::default()
-                .with_iter_limit(params.0)
-                .with_node_limit(params.1)
-                .with_time_limit(Duration::from_secs_f64(threshold))
-                .with_expr(&expr)
-                .run(rules(ruleset_class).iter());
-        }
+            runner_builder.run(rules(ruleset_class).iter())
+        };
         //Check if the expression is proved.
         id = runner.egraph.find(*runner.roots.last().unwrap());
         for (goal_index, goal) in goals.iter().enumerate() {
@@ -1444,11 +1418,31 @@ pub fn prove_pulses(
         total_time += exec_time;
         //Exit the loop if we saturated or reached the limits.
         if saturated || i > (nbr_passes - 1.0) || result {
-            exit = true;
+            break;
         } else {
             i += 1.0;
         }
+
+        //Extract the best expression from the egraph.
+        let mut extractor;
+        extractor = Extractor::new(&((&runner).egraph), AstDepth);
+
+        //Calculate the extraction time.
+        let now = Instant::now();
+        let (_, best_exprr) = extractor.find_best(id);
+        let extraction_time = now.elapsed().as_secs_f64();
+        expr = best_exprr;
+        total_time += extraction_time;
+        if report {
+            println!(
+                "Starting pass {} with Expr: {} in {}",
+                i,
+                format!("{}", expr).bright_green().bold(),
+                format!("{}", extraction_time).bright_green().bold()
+            );
+        }
     }
+
     if result {
         if report {
             println!(
