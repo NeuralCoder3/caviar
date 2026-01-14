@@ -1386,6 +1386,14 @@ pub fn prove_pulses(
     let mut runner;
     // Get the Id of the root eclass containing the initial expression.
     // id = runner.egraph.find(*runner.roots.last().unwrap());
+
+
+    let rules = rules(ruleset_class);
+    let mut cp_rules = Vec::<Rewrite>::new();
+    let mut critical_pairs_set = HashSet::<(String,String)>::new();
+    let mut critical_pairs = HashSet::<(String,(Id,String),(Id,String))>::new();
+
+
     // Run ES on each extracted expression until we reach a limit or we prove the expression.
     loop {
         let runner_builder = Runner::default()
@@ -1394,9 +1402,9 @@ pub fn prove_pulses(
             .with_time_limit(Duration::from_secs_f64(threshold))
             .with_expr(&expr);
         runner = if use_iteration_check {
-            runner_builder.run_check_iteration(rules(ruleset_class).iter(), &goals)
+            runner_builder.run_check_iteration(rules.iter().chain(cp_rules.iter()), &goals)
         } else {
-            runner_builder.run(rules(ruleset_class).iter())
+            runner_builder.run(rules.iter().chain(cp_rules.iter()))
         };
         //Check if the expression is proved.
         id = runner.egraph.find(*runner.roots.last().unwrap());
@@ -1441,6 +1449,141 @@ pub fn prove_pulses(
                 format!("{}", extraction_time).bright_green().bold()
             );
         }
+
+
+
+
+
+
+
+
+            // parents: for each eclass a list of classes that reference it
+            let mut parents = std::collections::HashMap::<Id, Vec<Id>>::new();
+            for eclass in runner.egraph.classes().map(|c| c) {
+                for node in &eclass.nodes {
+                    node.for_each(|child| {
+                        parents
+                            .entry(child)
+                            .or_insert_with(Vec::new)
+                            .push(eclass.id);
+                    });
+                }
+            }
+
+
+
+            // propagate upwards, eclass -> application point and rule
+            let mut sub_applicable = std::collections::HashMap::<Id, HashSet<(Id,String)>>::new();
+            for r in rules.iter() {
+                // TODO: handle conditional rewrites
+                if !r.cond.is_empty() {
+                    continue;
+                }
+                let matches = r.search(&runner.egraph);
+                // eclasses where the rule applies
+                let mut worklist = matches.iter()
+                    .map(|m| m.eclass)
+                    .map(|id| (id, id)) // (current, source)
+                    .collect::<HashSet<_>>();
+                while !worklist.is_empty() {
+                    let (current, source) = worklist.iter().next().unwrap().clone();
+                    worklist.remove(&(current, source));
+                    let entry = sub_applicable
+                        .entry(current)
+                        .or_insert_with(HashSet::new);
+                    if entry.insert((source, r.name().to_string())) {
+                        // only continue when freshly inserted => terminate at the latest after every eclass has been visited once
+                        if let Some(ps) = parents.get(&current) {
+                            for p in ps {
+                                worklist.insert((*p, source));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // only propagate up to either other node => intersection only at one of the rules
+            // at class c, get all pairs and take these that have one component be c
+            // find overlaps
+            for (eclass, apps) in sub_applicable.iter() {
+                let apps_vec = apps.iter().collect::<Vec<_>>();
+                for i in 0..apps_vec.len() {
+                    for j in (i + 1)..apps_vec.len() {
+                        let (src_i, rule_i) = apps_vec[i];
+                        let (src_j, rule_j) = apps_vec[j];
+                        if src_i != eclass && src_j != eclass {
+                            continue;
+                        }
+                        // sorted tuple in critical pairs
+                        let pair = if rule_i < rule_j {
+                            (rule_i.clone(), rule_j.clone())
+                        } else {
+                            (rule_j.clone(), rule_i.clone())
+                        };
+                        if critical_pairs_set.insert(pair) {
+                            let cp_count = critical_pairs_set.len();
+                            critical_pairs.insert((cp_count.to_string(), (*src_i, rule_i.clone()), (*src_j, rule_j.clone())));
+                            // println!(
+                            //     "Overlap found in eclass {}: rules '{}' and '{}' (from eclasses {} and {})",
+                            //     eclass, rule_i, rule_j, src_i, src_j
+                            // );
+                        }
+                        // println!(
+                        //     "Overlap found in eclass {}: rules '{}' and '{}' (from eclasses {} and {})",
+                        //     eclass, rule_i, rule_j, src_i, src_j
+                        // );
+                    }
+                }
+            }
+
+            // TODO: only critical pair overlap at correct positions not all
+            // TODO: only critical pair that were used in e-graph (at node) (custom applier)
+
+            for (cp_name,(src1, r1), (src2, r2)) in critical_pairs.iter() {
+                let rule1 = rules.iter().find(|r| r.name() == *r1).unwrap();
+                let rule2 = rules.iter().find(|r| r.name() == *r2).unwrap();
+                let r1 = (&rule1.lhs,&rule1.rhs);
+                let r2 = (&rule2.lhs,&rule2.rhs);
+                let cps = all_critical_pair_ref(r1, r2);
+                for (l, r) in cps.iter() {
+                    // TODO: not any two if can be unified (same_eq)
+                    //   Critical pair between '((* ?a 1) -> ?a)' and '((* ?a ?b) -> (* ?b ?a))': (* 1 ?a_0) = ?a_0
+                    //   Critical pair between '((* ?a 1) -> ?a)' and '((* ?a ?b) -> (* ?b ?a))': ?a = (* 1 ?a)
+                    // println!(
+                    //     "  Critical pair between '({} -> {})' and '({} -> {})': {} = {}",
+                    //     r1.0,r1.1,
+                    //     r2.0,r2.1,
+                    //     l,
+                    //     r
+                    // );
+                    // add critical pair as rewrite rule
+                    // consider both direction but only if no new variable are introduced
+                    let var_l = vars(l);
+                    let var_r = vars(r);
+                    fn is_var(t: &Term) -> bool {
+                        matches!(t, Term::Var(_))
+                    }
+                    if var_r.iter().all(|v| var_l.contains(v)) && !is_var(l) {
+                        // if var_r is subset of var_l 
+                        cp_rules.push(rule_of_cp(cp_name, l, r));
+                    }
+                    if var_l.iter().all(|v| var_r.contains(v)) && !is_var(r) {
+                        // if var_l is subset of var_r
+                        cp_rules.push(rule_of_cp(cp_name, r, l));
+                    }
+                }
+            }
+
+
+
+
+
+
+
+
+
+
+
     }
 
     if result {
