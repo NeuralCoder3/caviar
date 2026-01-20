@@ -2,8 +2,9 @@ use json::JsonValue;
 use core::panic;
 use std::collections::HashSet;
 use std::error::Error;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::iter;
+use std::sync::Arc;
 use std::time::Duration;
 use std::{cmp::Ordering, time::Instant};
 
@@ -232,6 +233,14 @@ pub fn compare_c0_c1(
     let var1: Var = var1.parse().unwrap();
 
     move |egraph, _, subst| {
+
+        if subst.get(var).is_none() {
+            panic!("Variable {:?} (var1: {:?}, comp: {:?}) not found in substitution {:?}", var, var1, comp, subst);
+        }
+        if subst.get(var1).is_none() {
+            panic!("Variable1 {:?} (var: {:?}, comp: {:?}) not found in substitution {:?}", var1, var, comp, subst);
+        }
+
         // Get the eclass of the first constant then match the values of its enodes to check if one of them proves the coming conditions
         egraph[subst[var1]].nodes.iter().any(|n1| match n1 {
             // Get the eclass of the second constant then match it to c1
@@ -1357,6 +1366,41 @@ macro_rules! write_npp {
     }};
 }
 
+
+
+
+// impl PartialEq for Condition<Math, ConstantFold> {
+//     fn eq(&self, other: &Self) -> bool {
+//         true
+//     }
+// }
+
+#[derive(Clone)]
+pub struct CpKey(pub Id, pub String, pub Vec<String>, pub Option<Arc<dyn Condition<Math, ConstantFold>>>);
+
+impl PartialEq for CpKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0 && self.1 == other.1 && self.2 == other.2
+    }
+}
+impl Eq for CpKey {}
+
+impl Hash for CpKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+        self.1.hash(state);
+        self.2.hash(state);
+    }
+}
+
+
+
+
+
+// #[derive(Clone)]
+// pub struct CpKey2(pub Id, pub String, pub Vec<String>, pub Option<Arc<dyn Condition<Math, ConstantFold>>>);
+// (Id,String, Vec<String>, Option<Arc<dyn Condition<Math, ConstantFold>>>)
+
 /// Prove an expression to true or false by using the Pulsing Caviar heuristic.
 #[allow(dead_code)]
 pub fn prove_pulses(
@@ -1406,7 +1450,10 @@ pub fn prove_pulses(
     let rules = rules(ruleset_class);
     let mut cp_rules = Vec::<Rewrite>::new();
     let mut critical_pairs_set = HashSet::<(String,String)>::new();
-    let mut critical_pairs = HashSet::<(String,(Id,String, Vec<String>),(Id,String, Vec<String>))>::new();
+    // let mut critical_pairs = HashSet::<(String,(Id,String, Vec<String>, ),(Id,String, Vec<String>))>::new();
+    let mut critical_pairs = HashSet::<(String,CpKey,CpKey)>::new();
+        // (Id,String, Vec<String>, Option<Arc<dyn Condition<Math, ConstantFold>>>)
+        // (Id,String, Vec<String>, Option<Arc<dyn Condition<Math, ConstantFold>>>))>::new();
     let mut rule_name_counter = 0;
 
 
@@ -1489,7 +1536,8 @@ pub fn prove_pulses(
 
 
             // propagate upwards, eclass -> application point, rule, and condition
-            let mut sub_applicable = std::collections::HashMap::<Id, HashSet<(Id,String, Vec<String>)>>::new();
+            // let mut sub_applicable = std::collections::HashMap::<Id, HashSet<(Id,String, Vec<String>, Option<Arc<dyn Condition<Math, ConstantFold>>>)>>::new();
+            let mut sub_applicable = std::collections::HashMap::<Id, HashSet<CpKey>>::new();
             for r in rules.iter() {
                 // TODO: handle conditional rewrites
                 // if !r.cond.is_empty() {
@@ -1507,7 +1555,7 @@ pub fn prove_pulses(
                     let entry = sub_applicable
                         .entry(current)
                         .or_insert_with(HashSet::new);
-                    if entry.insert((source, r.name().to_string(), r.cond.clone())) {
+                    if entry.insert(CpKey(source, r.name().to_string(), r.cond.clone(), r.conds.clone())) {
                         // only continue when freshly inserted => terminate at the latest after every eclass has been visited once
                         if let Some(ps) = parents.get(&current) {
                             for p in ps {
@@ -1525,8 +1573,8 @@ pub fn prove_pulses(
                 let apps_vec = apps.iter().collect::<Vec<_>>();
                 for i in 0..apps_vec.len() {
                     for j in (i + 1)..apps_vec.len() {
-                        let (src_i, rule_i, cond_i) = apps_vec[i];
-                        let (src_j, rule_j, cond_j) = apps_vec[j];
+                        let CpKey(src_i, rule_i, cond_i, conds_i) = apps_vec[i];
+                        let CpKey(src_j, rule_j, cond_j, conds_j) = apps_vec[j];
                         if src_i != eclass && src_j != eclass {
                             continue;
                         }
@@ -1538,7 +1586,7 @@ pub fn prove_pulses(
                         };
                         if critical_pairs_set.insert(pair) {
                             let cp_count = critical_pairs_set.len();
-                            critical_pairs.insert((cp_count.to_string(), (*src_i, rule_i.clone(), cond_i.clone()), (*src_j, rule_j.clone(), cond_j.clone())));
+                            critical_pairs.insert((cp_count.to_string(), CpKey(*src_i, rule_i.clone(), cond_i.clone(), conds_i.clone()), CpKey(*src_j, rule_j.clone(), cond_j.clone(), conds_j.clone())));
                             // println!(
                             //     "Overlap found in eclass {}: rules '{}' and '{}' (from eclasses {} and {})",
                             //     eclass, rule_i, rule_j, src_i, src_j
@@ -1555,7 +1603,7 @@ pub fn prove_pulses(
             // TODO: only critical pair overlap at correct positions not all
             // TODO: only critical pair that were used in e-graph (at node) (custom applier)
 
-            for (cp_name,(src1, r1,cond1), (src2, r2, cond2)) in critical_pairs.iter() {
+            for (cp_name,CpKey(src1, r1,cond1, conds1), CpKey(src2, r2, cond2, conds2)) in critical_pairs.iter() {
                 let rule1 = rules.iter().find(|r| r.name() == *r1).unwrap();
                 let rule2 = rules.iter().find(|r| r.name() == *r2).unwrap();
                 let r1 = (&rule1.lhs,&rule1.rhs);
@@ -1582,19 +1630,48 @@ pub fn prove_pulses(
                     let cp_name_lr = format!("cp_{}_lr", rule_name_counter);
                     let cp_name_rl = format!("cp_{}_rl", rule_name_counter);
                     rule_name_counter += 1;
-                    let conds = cond1.iter().chain(cond2.iter()).cloned().collect::<Vec<_>>();
-                    if !conds.is_empty() {
-                        panic!("Conditional critical pairs not supported yet, got conditions: {:?}", conds);
-                    }
+                    let condsstr = cond1.iter().chain(cond2.iter()).cloned().collect::<Vec<_>>();
+                    // if !condsstr.is_empty() {
+                    //     panic!("Conditional critical pairs not supported yet, got conditions: {:?}", condsstr);
+                    // }
+                    // let conds = if condsstr.is_empty() { None } else { Some(Arc::new(CombinedCondition(conds1, conds2))) };
+
+                    let conds = 
+                        if let Some(c1) = conds1 {
+                            if let Some(c2) = conds2 {
+                                Some(Arc::new(CombinedCondition(c1.clone(), c2.clone())) as Arc<dyn Condition<Math, ConstantFold>>)
+                            } else {
+                                Some(c1.clone())
+                            }
+                        } else {
+                            conds2.clone()
+                        };
+
+                        // TODO: print debug rules
+
                     if var_r.iter().all(|v| var_l.contains(v)) && !is_var(l) {
                         // if var_r is subset of var_l 
-                        // cp_rules.push(rule_of_cp_cond(cp_name_lr.as_str(), l, r, &conds));
-                        cp_rules.push(rule_of_cp(cp_name_lr.as_str(), l, r));
+                        println!(
+                            "Adding CP rule: {}: {} -> {} with conditions {:?}",
+                            cp_name_lr,
+                            l,
+                            r,
+                            condsstr
+                        );
+                        cp_rules.push(rule_of_cp_cond(cp_name_lr.as_str(), l, r, condsstr.clone(), conds.clone()));
+                        // cp_rules.push(rule_of_cp(cp_name_lr.as_str(), l, r));
                     }
                     if var_l.iter().all(|v| var_r.contains(v)) && !is_var(r) {
                         // if var_l is subset of var_r
-                        // cp_rules.push(rule_of_cp_cond(cp_name_rl.as_str(), r, l, &conds));
-                        cp_rules.push(rule_of_cp(cp_name_rl.as_str(), r, l));
+                        println!(
+                            " Adding CP rule: {}: {} -> {} with conditions {:?}",
+                            cp_name_rl,
+                            r,
+                            l,
+                            condsstr
+                        );
+                        cp_rules.push(rule_of_cp_cond(cp_name_rl.as_str(), r, l, condsstr, conds));
+                        // cp_rules.push(rule_of_cp(cp_name_rl.as_str(), r, l));
                     }
                 }
             }
