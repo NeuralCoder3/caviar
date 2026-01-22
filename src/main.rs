@@ -7,8 +7,8 @@ use std::time::Duration;
 use structs::{ExpressionStruct, ResultStructure};
 use trs::{prove, prove_expression_with_file_classes, prove_npp, prove_pulses, prove_pulses_npp};
 
-use crate::io::reader::read_expressions_paper;
-use crate::io::writer::write_results_paper;
+// use crate::io::reader::read_expressions_paper;
+// use crate::io::writer::write_results_paper;
 use crate::structs::PaperResult;
 use crate::trs::simplify;
 mod trs;

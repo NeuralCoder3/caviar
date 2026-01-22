@@ -1,11 +1,15 @@
+use crate::trs::ConditionRewrite;
 use crate::trs::ConstantFold;
 use crate::trs::Math;
-use egg::rewrite as rw;
-pub type Rewrite = egg::Rewrite<Math, ConstantFold>;
+// use egg::rewrite as rw1;
+use crate::rewrite2 as rw;
+pub type Rewrite = ConditionRewrite<Math, ConstantFold>;
 pub fn modulo() -> Vec<Rewrite> {
+    // let r1 =         rw!("mod-zero"      ; "(% 0 ?x)"             => "0" if crate::trs::IsNotZeroCondition::new("?x"));
+
     vec![
         //MOD RULES
-        rw!("mod-zero"      ; "(% 0 ?x)"             => "0" if crate::trs::is_not_zero("?x")),
+        rw!("mod-zero"      ; "(% 0 ?x)"             => "0" if crate::trs::IsNotZeroCondition::new("?x")),
         rw!("mod-x-x"       ; "(% ?x ?x)"            => "0" if crate::trs::is_not_zero("?x")),
         rw!("mod-one"       ; "(% ?x 1)"             => "0"),
         rw!("mod-minus-out" ; "(% (* ?x -1) ?c)"     => "(* -1 (% ?x ?c))" if crate::trs::is_not_zero("?c")),

@@ -1,3 +1,4 @@
+use crate::trs::ConditionRewrite;
 use crate::trs::{rules, ConstantFold, Math};
 use colored::*;
 use csv::ReaderBuilder;
@@ -60,8 +61,10 @@ pub fn minimal_set_to_prove(
     let data_object;
     ruleset.shuffle(&mut rng);
     println!("Ruleset size == {}", ruleset.len());
-    let mut ruleset_copy: Vec<egg::Rewrite<Math, ConstantFold>>;
-    let mut ruleset_minimal: Vec<egg::Rewrite<Math, ConstantFold>>;
+    // let mut ruleset_copy: Vec<egg::Rewrite<Math, ConstantFold>>;
+    // let mut ruleset_minimal: Vec<egg::Rewrite<Math, ConstantFold>>;
+    let mut ruleset_copy: Vec<ConditionRewrite<Math, ConstantFold>>;
+    let mut ruleset_minimal: Vec<ConditionRewrite<Math, ConstantFold>>;
     let ruleset_copy_names: Vec<String>;
     counter = 0;
     ruleset_minimal = ruleset.clone();
@@ -78,7 +81,7 @@ pub fn minimal_set_to_prove(
                 .with_node_limit(params.1)
                 .with_time_limit(Duration::from_secs_f64(params.2))
                 .with_expr(&start)
-                .run(ruleset_copy.iter());
+                .run(ruleset_copy.iter().map(|r| &r.rewrite));
             id = runner.egraph.find(*runner.roots.last().unwrap());
             matches = end.search_eclass(&runner.egraph, id);
             if matches.is_none() {
@@ -97,7 +100,7 @@ pub fn minimal_set_to_prove(
         ruleset_copy_names = ruleset_minimal
             .clone()
             .into_iter()
-            .map(|rule| rule.name().to_string())
+            .map(|rule| rule.rewrite.name().to_string())
             .rev()
             .collect();
         data_object = object! {
@@ -188,8 +191,8 @@ pub fn minimal_set_to_prove_0_1(
         let mut ruleset = rules(ruleset_id);
         let data_object;
         ruleset.shuffle(&mut rng);
-        let mut ruleset_copy: Vec<egg::Rewrite<Math, ConstantFold>>;
-        let mut ruleset_minimal: Vec<egg::Rewrite<Math, ConstantFold>>;
+        let mut ruleset_copy: Vec<ConditionRewrite<Math, ConstantFold>>;
+        let mut ruleset_minimal: Vec<ConditionRewrite<Math, ConstantFold>>;
         let ruleset_copy_names: Vec<String>;
         counter = 0;
         ruleset_minimal = ruleset.clone();
@@ -207,9 +210,9 @@ pub fn minimal_set_to_prove_0_1(
                     .with_expr(&start);
 
                 if use_iteration_check {
-                    runner = runner.run_check_iteration(ruleset_copy.iter(), &goals);
+                    runner = runner.run_check_iteration(ruleset_copy.iter().map(|r| &r.rewrite), &goals);
                 } else {
-                    runner = runner.run(ruleset_copy.iter());
+                    runner = runner.run(ruleset_copy.iter().map(|r| &r.rewrite));
                 }
                 id = runner.egraph.find(*runner.roots.last().unwrap());
                 matches = goals.iter().all(|goal| {
@@ -232,7 +235,7 @@ pub fn minimal_set_to_prove_0_1(
         ruleset_copy_names = ruleset_minimal
             .clone()
             .into_iter()
-            .map(|rule| rule.name().to_string())
+            .map(|rule| rule.rewrite.name().to_string())
             .rev()
             .collect();
         data_object = object! {

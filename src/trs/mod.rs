@@ -1,9 +1,10 @@
 use json::JsonValue;
 use core::panic;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
-use std::iter;
+use std::iter::{self, Map};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{cmp::Ordering, time::Instant};
@@ -16,7 +17,8 @@ use crate::structs::{ResultStructure, Rule};
 
 // Defining aliases to reduce code.
 pub type EGraph = egg::EGraph<Math, ConstantFold>;
-pub type Rewrite = egg::Rewrite<Math, ConstantFold>;
+// pub type Rewrite = egg::Rewrite<Math, ConstantFold>;
+pub type Rewrite = ConditionRewrite<Math, ConstantFold>;
 
 //Definition of the language used.
 define_language! {
@@ -67,11 +69,11 @@ impl Analysis<Math> for ConstantFold {
     fn make(egraph: &EGraph, enode: &Math) -> Self::Data {
         let x = |i: &Id| egraph[*i].data.as_ref();
         Some(match enode {
-            Math::Constant(c) => (*c),
-            Math::Add([a, b]) => (x(a)? + x(b)?),
-            Math::Sub([a, b]) => (x(a)? - x(b)?),
-            Math::Mul([a, b]) => (x(a)? * x(b)?),
-            Math::Div([a, b]) if *x(b)? != 0 => (x(a)? / x(b)?),
+            Math::Constant(c) => *c,
+            Math::Add([a, b]) => x(a)? + x(b)?,
+            Math::Sub([a, b]) => x(a)? - x(b)?,
+            Math::Mul([a, b]) => x(a)? * x(b)?,
+            Math::Div([a, b]) if *x(b)? != 0 => x(a)? / x(b)?,
             Math::Max([a, b]) => std::cmp::max(*x(a)?, *x(b)?),
             Math::Min([a, b]) => std::cmp::min(*x(a)?, *x(b)?),
             Math::Not(a) => {
@@ -181,11 +183,18 @@ pub fn all_conditions(
     }
 }
 
+pub fn is_const_pos(var: &str) -> impl ExtendedCondition<Math,ConstantFold> {
+    IsConstPosCondition::new(var)
+}
+
+pub fn is_const_neg(var: &str) -> impl ExtendedCondition<Math,ConstantFold> {
+    IsConstNegCondition::new(var)
+}
 
 /// Checks if a constant is positive
-pub fn is_const_pos(var: &str) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
+pub fn is_const_pos_fun(var: Var) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
     // Get the constant
-    let var = var.parse().unwrap();
+    // let var = var.parse().unwrap();
 
     // Get the substitutions where the constant appears
     move |egraph, _, subst| {
@@ -198,8 +207,8 @@ pub fn is_const_pos(var: &str) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
 }
 
 /// Checks if a constant is negative
-pub fn is_const_neg(var: &str) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
-    let var = var.parse().unwrap();
+pub fn is_const_neg_fun(var: Var) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
+    // let var = var.parse().unwrap();
 
     // Get the substitutions where the constant appears
     move |egraph, _, subst| {
@@ -212,14 +221,23 @@ pub fn is_const_neg(var: &str) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
 }
 
 /// Checks if a constant is equals zero
-pub fn is_not_zero(var: &str) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
-    let var = var.parse().unwrap();
+pub fn is_not_zero(var: &str) -> impl ExtendedCondition<Math,ConstantFold> {
+    IsNotZeroCondition::new(var)
+}
+// pub fn is_not_zero(var: &str) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
+//     let var = var.parse().unwrap();
+//     let zero = Math::Constant(0);
+//     // Check if any of the representations of the constant (nodes inside its eclass) is zero
+//     move |egraph, _, subst| !egraph[subst[var]].nodes.contains(&zero)
+// }
+
+
+pub fn is_not_zero_fun(var: Var) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
     let zero = Math::Constant(0);
     // Check if any of the representations of the constant (nodes inside its eclass) is zero
     move |egraph, _, subst| !egraph[subst[var]].nodes.contains(&zero)
 }
 
-/// Compares two constants c0 and c1
 pub fn compare_c0_c1(
     // first constant
     var: &str,
@@ -227,10 +245,23 @@ pub fn compare_c0_c1(
     var1: &str,
     // the comparison we're checking
     comp: &'static str,
+) -> impl ExtendedCondition<Math,ConstantFold> {
+    CompareC0C1Condition::new(var, var1, comp)
+}
+
+
+/// Compares two constants c0 and c1
+pub fn compare_c0_c1_fun(
+    // first constant
+    var: Var,
+    // 2nd constant
+    var1: Var,
+    // the comparison we're checking
+    comp: &'static str,
 ) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
     // Get constants
-    let var: Var = var.parse().unwrap();
-    let var1: Var = var1.parse().unwrap();
+    // let var: Var = var.parse().unwrap();
+    // let var1: Var = var1.parse().unwrap();
 
     move |egraph, _, subst| {
 
@@ -309,7 +340,7 @@ pub fn filtered_rules(class: &json::JsonValue) -> Result<Vec<Rewrite>, Box<dyn E
     ]
     .concat();
     let rules_iter = all_rules.into_iter();
-    let rules = rules_iter.filter(|rule| class.contains(rule.name()));
+    let rules = rules_iter.filter(|rule| class.contains(rule.rewrite.name()));
     return Ok(rules.collect());
 }
 
@@ -438,7 +469,7 @@ pub fn simplify(
             .with_expr(&best_expr)
             // .with_expr(&start_expression.parse().unwrap())
             // .run(rules.iter());
-            .run(rules.iter().chain(cp_rules.iter()));
+            .run(rules.iter().chain(cp_rules.iter()).map(|r| &r.rewrite));
             // .run(rules.iter().chain(cp_rules.iter().take(0)));
 
         //Get the ID of the root eclass.
@@ -469,10 +500,10 @@ pub fn simplify(
             let mut sub_applicable = std::collections::HashMap::<Id, HashSet<(Id,String)>>::new();
             for r in rules.iter() {
                 // TODO: handle conditional rewrites
-                if !r.cond.is_empty() {
+                if !r.conditions.is_empty() {
                     continue;
                 }
-                let matches = r.search(&runner.egraph);
+                let matches = r.rewrite.search(&runner.egraph);
                 // eclasses where the rule applies
                 let mut worklist = matches.iter()
                     .map(|m| m.eclass)
@@ -484,7 +515,7 @@ pub fn simplify(
                     let entry = sub_applicable
                         .entry(current)
                         .or_insert_with(HashSet::new);
-                    if entry.insert((source, r.name().to_string())) {
+                    if entry.insert((source, r.rewrite.name().to_string())) {
                         // only continue when freshly inserted => terminate at the latest after every eclass has been visited once
                         if let Some(ps) = parents.get(&current) {
                             for p in ps {
@@ -533,10 +564,10 @@ pub fn simplify(
             // TODO: only critical pair that were used in e-graph (at node) (custom applier)
 
             for (cp_name,(src1, r1), (src2, r2)) in critical_pairs.iter() {
-                let rule1 = rules.iter().find(|r| r.name() == *r1).unwrap();
-                let rule2 = rules.iter().find(|r| r.name() == *r2).unwrap();
-                let r1 = (&rule1.lhs,&rule1.rhs);
-                let r2 = (&rule2.lhs,&rule2.rhs);
+                let rule1 = rules.iter().find(|r| r.rewrite.name() == *r1).unwrap();
+                let rule2 = rules.iter().find(|r| r.rewrite.name() == *r2).unwrap();
+                let r1 = (&rule1.rewrite.lhs,&rule1.rewrite.rhs);
+                let r2 = (&rule2.rewrite.lhs,&rule2.rewrite.rhs);
                 let cps = all_critical_pair_ref(r1, r2);
                 for (l, r) in cps.iter() {
                     // TODO: not any two if can be unified (same_eq)
@@ -558,11 +589,11 @@ pub fn simplify(
                     }
                     if var_r.iter().all(|v| var_l.contains(v)) && !is_var(l) {
                         // if var_r is subset of var_l 
-                        cp_rules.push(rule_of_cp(cp_name, l, r));
+                        cp_rules.push(ConditionRewrite::of_rewrite(rule_of_cp(cp_name, l, r)));
                     }
                     if var_l.iter().all(|v| var_r.contains(v)) && !is_var(r) {
                         // if var_l is subset of var_r
-                        cp_rules.push(rule_of_cp(cp_name, r, l));
+                        cp_rules.push(ConditionRewrite::of_rewrite(rule_of_cp(cp_name, r, l)));
                     }
                 }
             }
@@ -663,7 +694,7 @@ pub fn prove_equiv(
             .with_node_limit(params.1)
             .with_time_limit(Duration::from_secs_f64(params.2))
             .with_expr(&start)
-            .run_check_iteration(rules(ruleset_class).iter(), &[end.clone()]);
+            .run_check_iteration(rules(ruleset_class).iter().map( |r| &r.rewrite), &[end.clone()]);
     } else {
         // Initialize a simple runner and run it.
         runner = Runner::default()
@@ -671,7 +702,7 @@ pub fn prove_equiv(
             .with_node_limit(params.1)
             .with_time_limit(Duration::from_secs_f64(params.2))
             .with_expr(&start)
-            .run(rules(ruleset_class).iter());
+            .run(rules(ruleset_class).iter().map( |r| &r.rewrite));
     }
     // Get the ID of the root eclass.
     let id = runner.egraph.find(*runner.roots.last().unwrap());
@@ -774,7 +805,7 @@ pub fn prove(
             .with_node_limit(params.1)
             .with_time_limit(Duration::from_secs_f64(params.2))
             .with_expr(&start)
-            .run_check_iteration(rules(ruleset_class).iter(), &goals);
+            .run_check_iteration(rules(ruleset_class).iter().map( |r| &r.rewrite), &goals);
     } else {
         // Initialize a simple runner and run it.
         runner = Runner::default()
@@ -782,7 +813,7 @@ pub fn prove(
             .with_node_limit(params.1)
             .with_time_limit(Duration::from_secs_f64(params.2))
             .with_expr(&start)
-            .run(rules(ruleset_class).iter());
+            .run(rules(ruleset_class).iter().map( |r| &r.rewrite));
     }
     // Get the ID of the root eclass.
     id = runner.egraph.find(*runner.roots.last().unwrap());
@@ -928,9 +959,9 @@ pub fn prove_expression_with_file_classes(
         }
 
         if use_iteration_check {
-            runner = runner.run_check_iteration_id(rules.iter(), &goals, id);
+            runner = runner.run_check_iteration_id(rules.iter().map( |r| &r.rewrite), &goals, id);
         } else {
-            runner = runner.run(rules.iter());
+            runner = runner.run(rules.iter().map( |r| &r.rewrite) );
         }
         // Get the execution time of the cluster of rules.
         let class_time: f64 = runner.iterations.iter().map(|i| i.total_time).sum();
@@ -1376,11 +1407,12 @@ macro_rules! write_npp {
 // }
 
 #[derive(Clone)]
-pub struct CpKey(pub Id, pub String, pub Vec<String>, pub Option<Arc<dyn Condition<Math, ConstantFold>>>);
+// pub struct CpKey(pub Id, pub String, pub Vec<String>, pub Option<Arc<dyn Condition<Math, ConstantFold>>>);
+pub struct CpKey(pub Id, pub Rewrite);
 
 impl PartialEq for CpKey {
     fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0 && self.1 == other.1 && self.2 == other.2
+        self.0 == other.0 && self.1.rewrite.name == other.1.rewrite.name
     }
 }
 impl Eq for CpKey {}
@@ -1388,12 +1420,382 @@ impl Eq for CpKey {}
 impl Hash for CpKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.hash(state);
-        self.1.hash(state);
-        self.2.hash(state);
+        self.1.rewrite.name.hash(state);
     }
 }
 
 
+
+
+
+
+
+
+#[derive(Clone)]
+pub struct ConditionRewrite<L,N> {
+    pub rewrite: egg::Rewrite<L,N>,
+    pub conditions: Vec<Arc<dyn ExtendedCondition<L,N>>>,
+}
+
+impl<L,N> Into<egg::Rewrite<L,N>> for ConditionRewrite<L,N>
+where
+    L: Language,
+    N: Analysis<L>,
+{
+    fn into(self) -> egg::Rewrite<L,N> {
+        self.rewrite
+    }
+}
+
+impl<L,N> ConditionRewrite<L,N> 
+where
+    L: Language,
+    N: Analysis<L>,
+{
+    pub fn new(
+        rewrite: egg::Rewrite<L,N>,
+        conditions: Vec<impl ExtendedCondition<L,N> + 'static>,
+    ) -> Self {
+        let conditions = conditions
+                .into_iter()
+                .map(|c| 
+                    Arc::new(c) as Arc<dyn ExtendedCondition<L,N>>
+                    // Arc::new(ExtendedConditionWrapper(c)) as Arc<dyn Condition<L,N>>
+                )
+                .collect();
+        Self {
+            rewrite,
+            conditions,
+        }
+    }
+
+    pub fn new_arc(
+        rewrite: egg::Rewrite<L,N>,
+        conditions: Vec<Arc<dyn ExtendedCondition<L,N>>>,
+    ) -> Self {
+        let conditions = conditions
+                .into_iter()
+                .collect();
+        Self {
+            rewrite,
+            conditions,
+        }
+    }
+
+
+    pub fn of_rewrite(
+        rewrite: egg::Rewrite<L,N>,
+    ) -> Self {
+        Self {
+            rewrite,
+            conditions: vec![],
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct IsNotZeroCondition {
+    pub var: Var,
+}
+
+impl IsNotZeroCondition {
+    pub fn new(var: &str) -> Self {
+        Self { var: var.parse().unwrap() }
+    }
+}
+
+impl ExtendedCondition<Math, ConstantFold> for IsNotZeroCondition {
+    fn as_condition(&self) -> Arc<dyn Condition<Math, ConstantFold>> {
+        Arc::new(crate::trs::is_not_zero_fun(self.var))
+    }
+
+    fn vars(&self) -> Vec<Var> {
+        vec![self.var.clone()]
+    }
+
+    fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> () {
+        if let Some(v) = subst.get(&self.var) {
+            self.var = v.clone();
+        }
+    }
+
+    fn stringify(&self) -> String {
+        format!("IsNotZero({})", self.var)
+    }
+}
+
+
+#[derive(Debug)]
+pub struct IsConstPosCondition {
+    pub var: Var,
+}
+impl IsConstPosCondition {
+    pub fn new(var: &str) -> Self {
+        Self { var: var.parse().unwrap() }
+    }
+}
+impl ExtendedCondition<Math, ConstantFold> for IsConstPosCondition {
+    fn as_condition(&self) -> Arc<dyn Condition<Math, ConstantFold>> {
+        Arc::new(crate::trs::is_const_pos_fun(self.var))
+    }
+    fn vars(&self) -> Vec<Var> {
+        vec![self.var.clone()]
+    }
+    fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> () {
+        if let Some(v) = subst.get(&self.var) {
+            self.var = v.clone();
+        }
+    }
+
+    fn stringify(&self) -> String {
+        format!("IsConstPos({})", self.var)
+    }
+}
+#[derive(Debug)]
+pub struct IsConstNegCondition {
+    pub var: Var,
+}
+impl IsConstNegCondition {
+    pub fn new(var: &str) -> Self {
+        Self { var: var.parse().unwrap() }
+    }
+}
+impl ExtendedCondition<Math, ConstantFold> for IsConstNegCondition {
+    fn as_condition(&self) -> Arc<dyn Condition<Math, ConstantFold>> {
+        Arc::new(crate::trs::is_const_neg_fun(self.var))
+    }
+    fn vars(&self) -> Vec<Var> {
+        vec![self.var.clone()]
+    }
+    fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> () {
+        if let Some(v) = subst.get(&self.var) {
+            self.var = v.clone();
+        }
+    }
+    fn stringify(&self) -> String {
+        format!("IsConstNeg({})", self.var)
+    }
+}
+
+
+#[derive(Debug)]
+pub struct CompareC0C1Condition {
+    pub var0: Var,
+    pub var1: Var,
+    pub comparison: &'static str
+}
+
+impl CompareC0C1Condition {
+    pub fn new(var0: &str, var1: &str, comparison: &'static str) -> Self {
+        Self { 
+            var0: var0.parse().unwrap(),
+            var1: var1.parse().unwrap(),
+            comparison,
+        }
+    }
+}
+
+impl ExtendedCondition<Math, ConstantFold> for CompareC0C1Condition {
+    fn as_condition(&self) -> Arc<dyn Condition<Math, ConstantFold>> {
+        Arc::new(crate::trs::compare_c0_c1_fun(self.var0, self.var1, self.comparison))
+    }
+
+    fn vars(&self) -> Vec<Var> {
+        vec![self.var0.clone(), self.var1.clone()]
+    }
+
+    fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> () {
+        if let Some(v) = subst.get(&self.var0) {
+            self.var0 = v.clone();
+        }
+        if let Some(v) = subst.get(&self.var1) {
+            self.var1 = v.clone();
+        }
+    }
+
+    fn stringify(&self) -> String {
+        format!("CompareC0C1({}, {}, {})", self.var0, self.var1, self.comparison)
+    }
+}
+
+
+
+
+pub trait ExtendedCondition<L,N>
+where
+    L: Language,
+    N: Analysis<L>,
+{
+    fn as_condition(&self) -> Arc<dyn Condition<L, N>>;
+
+    // handle Condition::vars correctly, or here
+    fn vars(&self) -> Vec<Var>;
+
+    fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> ();
+
+    fn stringify(&self) -> String;
+}
+
+pub struct ExtendedConditionWrapper<T>(pub T);
+
+impl<T, L, N> Condition<L, N> for ExtendedConditionWrapper<T>
+where 
+    L: Language,
+    N: Analysis<L>,
+    T: ExtendedCondition<L, N> 
+{
+    fn vars(&self) -> Vec<Var> {
+        <T as ExtendedCondition<L, N>>::vars(&self.0)
+    }
+
+    fn check(&self, egraph: &mut egg::EGraph<L, N>, eclass: Id, subst: &Subst) -> bool {
+        self.0.as_condition().check(egraph, eclass, subst)
+    }
+}
+// impl<L,N> Condition<L,N> for dyn ExtendedCondition<L,N>
+// where
+//     L: Language,
+//     N: Analysis<L>,
+// {
+//     fn vars(&self) -> Vec<Var> {
+//         self.vars()
+//     }
+
+//     fn check(&self, egraph: &mut egg::EGraph<L, N>, eclass: Id, subst: &Subst) -> bool {
+//         self.as_condition().check(egraph, eclass, subst)
+//     }
+// }
+
+
+
+
+// TODO: should be implied
+// impl Condition<Math,ConstantFold> for IsNotZeroCondition
+// {
+//     fn vars(&self) -> Vec<Var> {
+//         vec![self.var.clone()]
+//     }
+
+//     fn check(&self, egraph: &mut egg::EGraph<Math, ConstantFold>, eclass: Id, subst: &Subst) -> bool {
+//         self.as_condition().check(egraph, eclass, subst)
+//     }
+// }
+
+
+#[macro_export]
+macro_rules! rewrite2 {
+    (
+        $name:expr;
+        $lhs:tt => $rhs:tt
+    )  => {{
+        let searcher = $crate::__rewrite2!(@parse $lhs);
+        let core_applier = $crate::__rewrite2!(@parse $rhs);
+        let applier = core_applier;
+        let rewrite = egg::Rewrite::new(
+            $name,
+            ($lhs).to_string(),
+            ($rhs).to_string(),
+            // vec![],
+            // None::<std::sync::Arc<dyn egg::Condition<Math, ConstantFold>>>,
+            // None,
+            searcher,
+            applier,
+        ).unwrap();
+        // let empty_cond: Vec<impl ExtendedCondition<Math, ConstantFold>> = vec![];
+        $crate::trs::ConditionRewrite::of_rewrite(
+            rewrite,
+        )
+        // let empty_cond: Vec<$crate::trs::IsNotZeroCondition> = vec![];
+        // $crate::trs::ConditionRewrite::new(
+        //     rewrite,
+        //     // vec![],
+        //     empty_cond
+        // )
+    }};
+
+    (
+        $name:expr;
+        $lhs:tt => $rhs:tt
+        $(if $cond:expr)+
+    )  => {{
+        let searcher = $crate::__rewrite2!(@parse $lhs);
+        let core_applier = $crate::__rewrite2!(@parse $rhs);
+        let applier = $crate::__rewrite2!(@applier core_applier; $($cond,)*);
+        // egg::rewrite::new_with_condition(
+        //     $name,
+        //     ($lhs).to_string(),
+        //     ($rhs).to_string(),
+        //     // vec![$(stringify!($cond).to_string()),*],
+        //     // move |egraph, id, subst| {
+        //     //     true $(&& ($cond)(egraph, id, subst))*
+        //     // },
+        //     searcher,
+        //     applier,
+        // )
+        let rewrite = egg::Rewrite::new(
+            $name,
+            ($lhs).to_string(),
+            ($rhs).to_string(),
+            // no conditions given
+            // vec![],
+            // None::<fn(&mut _, _, _) -> bool>,
+            // None::<std::sync::Arc<dyn egg::Condition<_, _>>>,
+            // None,
+            searcher,
+            applier
+        ).unwrap();
+        $crate::trs::ConditionRewrite::new(
+            rewrite,
+            vec![$($cond),*],
+        )
+        // $crate::Rewrite::new(
+        //     $name,
+        //     ($lhs).to_string(),
+        //     ($rhs).to_string(),
+        //     // collect string representations of conditions
+        //     vec![$(stringify!($cond).to_string()),*],
+        //     // combined condition: call each provided condition and AND the results
+        //     // Some(std::sync::Arc::new(move |egraph, id, subst| {
+        //     //     true $(&& ($cond)(egraph, id, subst))*
+        //     // })),
+        //     Some(std::sync::Arc::new($crate::rewrite::FnCondition(move |egraph, id, subst| {
+        //         true $(&& ($cond)(egraph, id, subst))*
+        //     }))),
+        //     searcher,
+        //     applier,
+        // ).unwrap()
+    }};
+
+    (
+        $name:expr;
+        $lhs:tt <=> $rhs:tt
+        $(if $cond:expr)*
+    )  => {{
+        let name = $name;
+        let name2 = String::from(name.clone()) + "-rev";
+        vec![
+            $crate::rewrite2!(name;  $lhs => $rhs $(if $cond)*),
+            $crate::rewrite2!(name2; $rhs => $lhs $(if $cond)*)
+        ]
+    }};
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __rewrite2 {
+    (@parse $rhs:literal) => {
+        $rhs.parse::<egg::Pattern<_>>().unwrap()
+    };
+    (@parse $rhs:expr) => { $rhs };
+    (@applier $applier:expr;) => { $applier };
+    (@applier $applier:expr; $cond:expr, $($conds:expr,)*) => {
+        egg::ConditionalApplier {
+            // condition: $cond,
+            condition: $crate::trs::ExtendedConditionWrapper($cond),
+            applier: $crate::__rewrite2!(@applier $applier; $($conds,)*)
+        }
+    };
+}
 
 
 
@@ -1450,6 +1852,7 @@ pub fn prove_pulses(
     let rules = rules(ruleset_class);
     let mut cp_rules = Vec::<Rewrite>::new();
     let mut critical_pairs_set = HashSet::<(String,String)>::new();
+    // let mut critical_pairs_set = HashSet::<(Rewrite,Rewrite)>::new();
     // let mut critical_pairs = HashSet::<(String,(Id,String, Vec<String>, ),(Id,String, Vec<String>))>::new();
     let mut critical_pairs = HashSet::<(String,CpKey,CpKey)>::new();
         // (Id,String, Vec<String>, Option<Arc<dyn Condition<Math, ConstantFold>>>)
@@ -1465,9 +1868,9 @@ pub fn prove_pulses(
             .with_time_limit(Duration::from_secs_f64(threshold))
             .with_expr(&expr);
         runner = if use_iteration_check {
-            runner_builder.run_check_iteration(rules.iter().chain(cp_rules.iter()), &goals)
+            runner_builder.run_check_iteration(rules.iter().chain(cp_rules.iter()).map(|r| &r.rewrite), &goals)
         } else {
-            runner_builder.run(rules.iter().chain(cp_rules.iter()))
+            runner_builder.run(rules.iter().chain(cp_rules.iter()).map(|r| &r.rewrite))
         };
         //Check if the expression is proved.
         id = runner.egraph.find(*runner.roots.last().unwrap());
@@ -1543,7 +1946,7 @@ pub fn prove_pulses(
                 // if !r.cond.is_empty() {
                 //     continue;
                 // }
-                let matches = r.search(&runner.egraph);
+                let matches = r.rewrite.search(&runner.egraph);
                 // eclasses where the rule applies
                 let mut worklist = matches.iter()
                     .map(|m| m.eclass)
@@ -1555,7 +1958,7 @@ pub fn prove_pulses(
                     let entry = sub_applicable
                         .entry(current)
                         .or_insert_with(HashSet::new);
-                    if entry.insert(CpKey(source, r.name().to_string(), r.cond.clone(), r.conds.clone())) {
+                    if entry.insert(CpKey(source, r.clone())) {
                         // only continue when freshly inserted => terminate at the latest after every eclass has been visited once
                         if let Some(ps) = parents.get(&current) {
                             for p in ps {
@@ -1573,20 +1976,22 @@ pub fn prove_pulses(
                 let apps_vec = apps.iter().collect::<Vec<_>>();
                 for i in 0..apps_vec.len() {
                     for j in (i + 1)..apps_vec.len() {
-                        let CpKey(src_i, rule_i, cond_i, conds_i) = apps_vec[i];
-                        let CpKey(src_j, rule_j, cond_j, conds_j) = apps_vec[j];
+                        let CpKey(src_i, rule_i) = apps_vec[i];
+                        let CpKey(src_j, rule_j) = apps_vec[j];
                         if src_i != eclass && src_j != eclass {
                             continue;
                         }
+                        let name_i = rule_i.rewrite.name();
+                        let name_j = rule_j.rewrite.name();
                         // sorted tuple in critical pairs
-                        let pair = if rule_i < rule_j {
-                            (rule_i.clone(), rule_j.clone())
+                        let pair = if name_i < name_j {
+                            (name_i.to_string(), name_j.to_string())
                         } else {
-                            (rule_j.clone(), rule_i.clone())
+                            (name_j.to_string(), name_i.to_string())
                         };
                         if critical_pairs_set.insert(pair) {
                             let cp_count = critical_pairs_set.len();
-                            critical_pairs.insert((cp_count.to_string(), CpKey(*src_i, rule_i.clone(), cond_i.clone(), conds_i.clone()), CpKey(*src_j, rule_j.clone(), cond_j.clone(), conds_j.clone())));
+                            critical_pairs.insert((cp_count.to_string(), CpKey(*src_i, rule_i.clone()), CpKey(*src_j, rule_j.clone())));
                             // println!(
                             //     "Overlap found in eclass {}: rules '{}' and '{}' (from eclasses {} and {})",
                             //     eclass, rule_i, rule_j, src_i, src_j
@@ -1603,11 +2008,11 @@ pub fn prove_pulses(
             // TODO: only critical pair overlap at correct positions not all
             // TODO: only critical pair that were used in e-graph (at node) (custom applier)
 
-            for (cp_name,CpKey(src1, r1,cond1, conds1), CpKey(src2, r2, cond2, conds2)) in critical_pairs.iter() {
-                let rule1 = rules.iter().find(|r| r.name() == *r1).unwrap();
-                let rule2 = rules.iter().find(|r| r.name() == *r2).unwrap();
-                let r1 = (&rule1.lhs,&rule1.rhs);
-                let r2 = (&rule2.lhs,&rule2.rhs);
+            for (_cp_name, CpKey(_src1, rule1), CpKey(_src2, rule2)) in critical_pairs.iter() {
+                // let rule1 = rules.iter().find(|r| r.rewrite.name() == *r1).unwrap();
+                // let rule2 = rules.iter().find(|r| r.rewrite.name() == *r2).unwrap();
+                let r1 = (&rule1.rewrite.lhs,&rule1.rewrite.rhs);
+                let r2 = (&rule2.rewrite.lhs,&rule2.rewrite.rhs);
                 let cps = all_critical_pair_ref(r1, r2);
                 for (l, r) in cps.iter() {
                     // TODO: not any two if can be unified (same_eq)
@@ -1630,47 +2035,88 @@ pub fn prove_pulses(
                     let cp_name_lr = format!("cp_{}_lr", rule_name_counter);
                     let cp_name_rl = format!("cp_{}_rl", rule_name_counter);
                     rule_name_counter += 1;
-                    let condsstr = cond1.iter().chain(cond2.iter()).cloned().collect::<Vec<_>>();
+                    // let condsstr = cond1.iter().chain(cond2.iter()).cloned().collect::<Vec<_>>();
                     // if !condsstr.is_empty() {
                     //     panic!("Conditional critical pairs not supported yet, got conditions: {:?}", condsstr);
                     // }
                     // let conds = if condsstr.is_empty() { None } else { Some(Arc::new(CombinedCondition(conds1, conds2))) };
 
-                    let conds = 
-                        if let Some(c1) = conds1 {
-                            if let Some(c2) = conds2 {
-                                Some(Arc::new(CombinedCondition(c1.clone(), c2.clone())) as Arc<dyn Condition<Math, ConstantFold>>)
-                            } else {
-                                Some(c1.clone())
-                            }
-                        } else {
-                            conds2.clone()
-                        };
+                    // let conds = 
+                    //     if let Some(c1) = conds1 {
+                    //         if let Some(c2) = conds2 {
+                    //             Some(Arc::new(CombinedCondition(c1.clone(), c2.clone())) as Arc<dyn Condition<Math, ConstantFold>>)
+                    //         } else {
+                    //             Some(c1.clone())
+                    //         }
+                    //     } else {
+                    //         conds2.clone()
+                    //     };
 
                         // TODO: print debug rules
+
+                    let conds = 
+                        rule1.conditions.iter().chain(rule2.conditions.iter())
+                        .map(|c| {
+                            // let mut cnew = (*c).clone();
+                            // apply substitution from critical pair unification
+                            // let subst_cp = unify_terms(l, r).unwrap();
+                            // cnew.apply_subst(&subst_cp);
+                            c.clone()
+                        })
+                        .collect::<Vec<_>>();
+                    let condsstr = conds.iter().map(|c| c.stringify()).collect::<Vec<_>>();
+                    let condsstr = "conds: ".to_string() + &format!("{:?}", condsstr);
+
+                    let lhs_pattern = Pattern::from_str(&l.to_string()).unwrap();
+                    let rhs_pattern = Pattern::from_str(&r.to_string()).unwrap();
 
                     if var_r.iter().all(|v| var_l.contains(v)) && !is_var(l) {
                         // if var_r is subset of var_l 
                         println!(
-                            "Adding CP rule: {}: {} -> {} with conditions {:?}",
+                            "Adding CP rule: {}: {} -> {} with conditions {:?}\n  (original1: {:?} -> {:?}, original2: {:?} -> {:?})",
                             cp_name_lr,
                             l,
                             r,
-                            condsstr
+                            condsstr,
+                            rule1.rewrite.lhs,
+                            rule1.rewrite.rhs,
+                            rule2.rewrite.lhs,
+                            rule2.rewrite.rhs
                         );
-                        cp_rules.push(rule_of_cp_cond(cp_name_lr.as_str(), l, r, condsstr.clone(), conds.clone()));
+                        // cp_rules.push(rule_of_cp_cond(cp_name_lr.as_str(), l, r, condsstr.clone(), conds.clone()));
+                        cp_rules.push(ConditionRewrite::new_arc(
+                            egg::Rewrite::new(
+                                cp_name_lr.as_str(),
+                                lhs_pattern.clone().to_string(),
+                                rhs_pattern.clone().to_string(),
+                                lhs_pattern.clone(),
+                                rhs_pattern.clone(),
+                            ).unwrap(),
+                            conds.iter().cloned().collect(),
+                        ));
                         // cp_rules.push(rule_of_cp(cp_name_lr.as_str(), l, r));
                     }
                     if var_l.iter().all(|v| var_r.contains(v)) && !is_var(r) {
                         // if var_l is subset of var_r
-                        println!(
-                            " Adding CP rule: {}: {} -> {} with conditions {:?}",
-                            cp_name_rl,
-                            r,
-                            l,
-                            condsstr
-                        );
-                        cp_rules.push(rule_of_cp_cond(cp_name_rl.as_str(), r, l, condsstr, conds));
+                        println!("Added inverse rule {}: {} -> {}", cp_name_rl, r, l);
+                        // println!(
+                        //     " Adding CP rule: {}: {} -> {} with conditions {:?}",
+                        //     cp_name_rl,
+                        //     r,
+                        //     l,
+                        //     condsstr
+                        // );
+                        // cp_rules.push(rule_of_cp_cond(cp_name_rl.as_str(), r, l, condsstr, conds));
+                        cp_rules.push(ConditionRewrite::new_arc(
+                            egg::Rewrite::new(
+                                cp_name_rl.as_str(),
+                                rhs_pattern.to_string(),
+                                lhs_pattern.to_string(),
+                                rhs_pattern,
+                                lhs_pattern,
+                            ).unwrap(),
+                            conds
+                        ));
                         // cp_rules.push(rule_of_cp(cp_name_rl.as_str(), r, l));
                     }
                 }
@@ -1863,7 +2309,7 @@ pub fn prove_pulses_npp(
                 .with_node_limit(params.1)
                 .with_time_limit(Duration::from_secs_f64(threshold))
                 .with_expr(&expr)
-                .run_fast(rules(ruleset_class).iter(), &goals, check_npp);
+                .run_fast(rules(ruleset_class).iter().map(|r| &r.rewrite), &goals, check_npp);
             runner = temp_runner;
             total_time += impo_time;
         } else {
@@ -1873,7 +2319,7 @@ pub fn prove_pulses_npp(
                 .with_node_limit(params.1)
                 .with_time_limit(Duration::from_secs_f64(threshold))
                 .with_expr(&expr)
-                .run(rules(ruleset_class).iter());
+                .run(rules(ruleset_class).iter().map(|r| &r.rewrite));
         }
 
         //Check if one of the goals match the root eclass of the egraph.
@@ -2005,7 +2451,7 @@ pub fn prove_npp(
             .with_node_limit(params.1)
             .with_time_limit(Duration::from_secs_f64(params.2))
             .with_expr(&start)
-            .run_fast(rules(ruleset_class).iter(), &goals, check_npp);
+            .run_fast(rules(ruleset_class).iter().map(|r| &r.rewrite), &goals, check_npp);
         runner = runner_temp;
         total_time += impo_time;
     } else {
@@ -2015,7 +2461,7 @@ pub fn prove_npp(
             .with_node_limit(params.1)
             .with_time_limit(Duration::from_secs_f64(params.2))
             .with_expr(&start)
-            .run(rules(ruleset_class).iter());
+            .run(rules(ruleset_class).iter().map(|r| &r.rewrite));
     }
     //Get the id of the  eclass containing the input expression.
     id = runner.egraph.find(*runner.roots.last().unwrap());
