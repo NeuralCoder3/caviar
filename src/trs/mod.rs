@@ -170,6 +170,20 @@ impl Analysis<Math> for ConstantFold {
     }
 }
 
+pub fn all_conditions_extended(
+    conds: Vec<Arc<dyn ExtendedCondition<Math,ConstantFold>>>
+) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
+    move |egraph, id, subst| {
+        for cond in conds.iter() {
+            if !cond.as_condition().check(egraph, id, subst) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+
 pub fn all_conditions(
     conds: Vec<impl Fn(&mut EGraph, Id, &Subst) -> bool>
 ) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
@@ -569,7 +583,7 @@ pub fn simplify(
                 let r1 = (&rule1.rewrite.lhs,&rule1.rewrite.rhs);
                 let r2 = (&rule2.rewrite.lhs,&rule2.rewrite.rhs);
                 let cps = all_critical_pair_ref(r1, r2);
-                for (l, r) in cps.iter() {
+                for (l, r, _) in cps.iter() {
                     // TODO: not any two if can be unified (same_eq)
                     //   Critical pair between '((* ?a 1) -> ?a)' and '((* ?a ?b) -> (* ?b ?a))': (* 1 ?a_0) = ?a_0
                     //   Critical pair between '((* ?a 1) -> ?a)' and '((* ?a ?b) -> (* ?b ?a))': ?a = (* 1 ?a)
@@ -1493,7 +1507,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IsNotZeroCondition {
     pub var: Var,
 }
@@ -1513,10 +1527,17 @@ impl ExtendedCondition<Math, ConstantFold> for IsNotZeroCondition {
         vec![self.var.clone()]
     }
 
-    fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> () {
+    // fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> () {
+    //     if let Some(v) = subst.get(&self.var) {
+    //         self.var = v.clone();
+    //     }
+    // }
+    fn with_subst(&self, subst: &HashMap<Var, Var>) -> Arc<dyn ExtendedCondition<Math, ConstantFold>> {
+        let mut new_cond = self.clone();
         if let Some(v) = subst.get(&self.var) {
-            self.var = v.clone();
+            new_cond.var = v.clone();
         }
+        Arc::new(new_cond)
     }
 
     fn stringify(&self) -> String {
@@ -1525,7 +1546,7 @@ impl ExtendedCondition<Math, ConstantFold> for IsNotZeroCondition {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IsConstPosCondition {
     pub var: Var,
 }
@@ -1541,17 +1562,24 @@ impl ExtendedCondition<Math, ConstantFold> for IsConstPosCondition {
     fn vars(&self) -> Vec<Var> {
         vec![self.var.clone()]
     }
-    fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> () {
+    // fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> () {
+    //     if let Some(v) = subst.get(&self.var) {
+    //         self.var = v.clone();
+    //     }
+    // }
+    fn with_subst(&self, subst: &HashMap<Var, Var>) -> Arc<dyn ExtendedCondition<Math, ConstantFold>> {
+        let mut new_cond = self.clone();
         if let Some(v) = subst.get(&self.var) {
-            self.var = v.clone();
+            new_cond.var = v.clone();
         }
+        Arc::new(new_cond)
     }
 
     fn stringify(&self) -> String {
         format!("IsConstPos({})", self.var)
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IsConstNegCondition {
     pub var: Var,
 }
@@ -1567,10 +1595,17 @@ impl ExtendedCondition<Math, ConstantFold> for IsConstNegCondition {
     fn vars(&self) -> Vec<Var> {
         vec![self.var.clone()]
     }
-    fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> () {
+    // fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> () {
+    //     if let Some(v) = subst.get(&self.var) {
+    //         self.var = v.clone();
+    //     }
+    // }
+    fn with_subst(&self, subst: &HashMap<Var, Var>) -> Arc<dyn ExtendedCondition<Math, ConstantFold>> {
+        let mut new_cond = self.clone();
         if let Some(v) = subst.get(&self.var) {
-            self.var = v.clone();
+            new_cond.var = v.clone();
         }
+        Arc::new(new_cond)
     }
     fn stringify(&self) -> String {
         format!("IsConstNeg({})", self.var)
@@ -1578,7 +1613,7 @@ impl ExtendedCondition<Math, ConstantFold> for IsConstNegCondition {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CompareC0C1Condition {
     pub var0: Var,
     pub var1: Var,
@@ -1604,13 +1639,24 @@ impl ExtendedCondition<Math, ConstantFold> for CompareC0C1Condition {
         vec![self.var0.clone(), self.var1.clone()]
     }
 
-    fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> () {
+    // fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> () {
+    //     if let Some(v) = subst.get(&self.var0) {
+    //         self.var0 = v.clone();
+    //     }
+    //     if let Some(v) = subst.get(&self.var1) {
+    //         self.var1 = v.clone();
+    //     }
+    // }
+
+    fn with_subst(&self, subst: &HashMap<Var, Var>) -> Arc<dyn ExtendedCondition<Math, ConstantFold>> {
+        let mut new_cond = self.clone();
         if let Some(v) = subst.get(&self.var0) {
-            self.var0 = v.clone();
+            new_cond.var0 = v.clone();
         }
         if let Some(v) = subst.get(&self.var1) {
-            self.var1 = v.clone();
+            new_cond.var1 = v.clone();
         }
+        Arc::new(new_cond)
     }
 
     fn stringify(&self) -> String {
@@ -1631,7 +1677,9 @@ where
     // handle Condition::vars correctly, or here
     fn vars(&self) -> Vec<Var>;
 
-    fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> ();
+    // fn apply_subst(&mut self, subst: &HashMap<Var, Var>) -> ();
+    // fn with_subst(&self, subst: &HashMap<Var, Var>) -> Self where Self: Sized;
+    fn with_subst(&self, subst: &HashMap<Var, Var>) -> Arc<dyn ExtendedCondition<L,N>>;
 
     fn stringify(&self) -> String;
 }
@@ -2013,8 +2061,9 @@ pub fn prove_pulses(
                 // let rule2 = rules.iter().find(|r| r.rewrite.name() == *r2).unwrap();
                 let r1 = (&rule1.rewrite.lhs,&rule1.rewrite.rhs);
                 let r2 = (&rule2.rewrite.lhs,&rule2.rewrite.rhs);
+                // TODO: subst of critical_pair_parts ignored => variable condition might become subterm condition
                 let cps = all_critical_pair_ref(r1, r2);
-                for (l, r) in cps.iter() {
+                for (l, r, r_subst) in cps.iter() {
                     // TODO: not any two if can be unified (same_eq)
                     //   Critical pair between '((* ?a 1) -> ?a)' and '((* ?a ?b) -> (* ?b ?a))': (* 1 ?a_0) = ?a_0
                     //   Critical pair between '((* ?a 1) -> ?a)' and '((* ?a ?b) -> (* ?b ?a))': ?a = (* 1 ?a)
@@ -2054,8 +2103,22 @@ pub fn prove_pulses(
 
                         // TODO: print debug rules
 
+                    let r_subst_map: HashMap<Var, Var> = r_subst.iter().map(|(k,v)| {
+                        let var1 = k.parse().unwrap();
+                        let var2 = v.parse().unwrap();
+                        (var1, var2)
+                    }).collect();
+                    let r2_conds = rule2.conditions.iter().map(|c| {
+                        // let mut cnew = (*c).clone();
+                        // apply substitution from critical pair unification
+                        // cnew.apply_subst(&r_subst_map);
+                        // cnew
+                        c.with_subst(&r_subst_map)
+                    }).collect::<Vec<_>>();
                     let conds = 
-                        rule1.conditions.iter().chain(rule2.conditions.iter())
+                        rule1.conditions.iter()
+                        // .chain(rule2.conditions.iter())
+                        .chain(r2_conds.iter())
                         .map(|c| {
                             // let mut cnew = (*c).clone();
                             // apply substitution from critical pair unification
@@ -2070,19 +2133,65 @@ pub fn prove_pulses(
                     let lhs_pattern = Pattern::from_str(&l.to_string()).unwrap();
                     let rhs_pattern = Pattern::from_str(&r.to_string()).unwrap();
 
-                    if var_r.iter().all(|v| var_l.contains(v)) && !is_var(l) {
-                        // if var_r is subset of var_l 
+
+                    let condvars = conds.iter().flat_map(|c| 
+                        c.vars().iter().map(|v| v.to_string()).collect::<Vec<_>>()
+                    ).collect::<HashSet<_>>();
+
+                    // is there a condition variable that does not occur in the rule?
+                    if condvars.iter().any(|v| !var_l.contains(v) && !var_r.contains(v)) {
                         println!(
-                            "Adding CP rule: {}: {} -> {} with conditions {:?}\n  (original1: {:?} -> {:?}, original2: {:?} -> {:?})",
+                            "Skipping CP rule {}: {} -> {} because condition variable(s) {:?} do not occur in the rule",
                             cp_name_lr,
                             l,
                             r,
-                            condsstr,
-                            rule1.rewrite.lhs,
-                            rule1.rewrite.rhs,
-                            rule2.rewrite.lhs,
-                            rule2.rewrite.rhs
+                            condvars.iter().filter(|v| !var_l.contains(v) && !var_r.contains(v)).collect::<Vec<_>>()
                         );
+                        // panic!();
+                        continue;
+                    }
+
+
+                    // if ! conds.is_empty() {
+                    //     // for testing
+                    //     continue;
+                    // }
+
+                    println!(
+                        "Adding CP rule: {}: {} -> {} with conditions {:?}\n  (original1: {} -> {}, original2: {} -> {})\n  using CP subst {:?}",
+                        cp_name_lr,
+                        l,
+                        r,
+                        condsstr,
+                        rule1.rewrite.lhs,
+                        rule1.rewrite.rhs,
+                        rule2.rewrite.lhs,
+                        rule2.rewrite.rhs,
+                        r_subst    
+                    );
+
+                    if var_r.iter().all(|v| var_l.contains(v)) && !is_var(l) {
+                        // if var_r is subset of var_l 
+                        // println!(
+                        //     "Adding CP rule: {}: {} -> {} with conditions {:?}\n  (original1: {:?} -> {:?}, original2: {:?} -> {:?})",
+                        //     cp_name_lr,
+                        //     l,
+                        //     r,
+                        //     condsstr,
+                        //     rule1.rewrite.lhs,
+                        //     rule1.rewrite.rhs,
+                        //     rule2.rewrite.lhs,
+                        //     rule2.rewrite.rhs
+                        // );
+                        println!("Added rule {}: {} -> {}", cp_name_lr, l, r);
+
+                        let cond_applier = 
+                            ConditionalApplier {
+                                // condition: all_conditions(conds.iter().map(|c| c.as_condition()).collect()),
+                                condition: all_conditions_extended(conds.clone()),
+                                applier: rhs_pattern.clone(),
+                            };
+
                         // cp_rules.push(rule_of_cp_cond(cp_name_lr.as_str(), l, r, condsstr.clone(), conds.clone()));
                         cp_rules.push(ConditionRewrite::new_arc(
                             egg::Rewrite::new(
@@ -2090,7 +2199,8 @@ pub fn prove_pulses(
                                 lhs_pattern.clone().to_string(),
                                 rhs_pattern.clone().to_string(),
                                 lhs_pattern.clone(),
-                                rhs_pattern.clone(),
+                                // rhs_pattern.clone(),
+                                cond_applier,
                             ).unwrap(),
                             conds.iter().cloned().collect(),
                         ));
@@ -2107,13 +2217,20 @@ pub fn prove_pulses(
                         //     condsstr
                         // );
                         // cp_rules.push(rule_of_cp_cond(cp_name_rl.as_str(), r, l, condsstr, conds));
+                        let cond_applier = 
+                            ConditionalApplier {
+                                // condition: all_conditions(conds.iter().map(|c| c.as_condition()).collect()),
+                                condition: all_conditions_extended(conds.clone()),
+                                applier: lhs_pattern.clone(),
+                            };
                         cp_rules.push(ConditionRewrite::new_arc(
                             egg::Rewrite::new(
                                 cp_name_rl.as_str(),
                                 rhs_pattern.to_string(),
                                 lhs_pattern.to_string(),
                                 rhs_pattern,
-                                lhs_pattern,
+                                // lhs_pattern,
+                                cond_applier,
                             ).unwrap(),
                             conds
                         ));
