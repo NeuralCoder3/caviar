@@ -323,89 +323,22 @@ pub fn compare_c0_c1_fun(
 
 /// Takes a JSON array of rules ids and return the vector of their associated Rewrites
 pub fn filtered_rules(class: &json::JsonValue) -> Result<Vec<Rewrite>, Box<dyn Error>> {
-    let add_rules = crate::rules::add::add();
-    let and_rules = crate::rules::and::and();
-    let andor_rules = crate::rules::andor::andor();
-    let div_rules = crate::rules::div::div();
-    let eq_rules = crate::rules::eq::eq();
-    let ineq_rules = crate::rules::ineq::ineq();
-    let lt_rules = crate::rules::lt::lt();
-    let max_rules = crate::rules::max::max();
-    let min_rules = crate::rules::min::min();
-    let modulo_rules = crate::rules::modulo::modulo();
-    let mul_rules = crate::rules::mul::mul();
-    let not_rules = crate::rules::not::not();
-    let or_rules = crate::rules::or::or();
-    let sub_rules = crate::rules::sub::sub();
-
-    let all_rules: Vec<Rewrite> = [
-        &add_rules[..],
-        &and_rules[..],
-        &andor_rules[..],
-        &div_rules[..],
-        &eq_rules[..],
-        &ineq_rules[..],
-        &lt_rules[..],
-        &max_rules[..],
-        &min_rules[..],
-        &modulo_rules[..],
-        &mul_rules[..],
-        &not_rules[..],
-        &or_rules[..],
-        &sub_rules[..],
-    ]
-    .concat();
+    // Use the new all() function
+    let all_rules = crate::rules::all();
+    
     let rules_iter = all_rules.into_iter();
     let rules = rules_iter.filter(|rule| class.contains(rule.rewrite.name()));
     return Ok(rules.collect());
 }
 
 /// takes an class of rules to use then returns the vector of their associated Rewrites
-#[rustfmt::skip]
 pub fn rules(ruleset_class: i8) -> Vec<Rewrite> {
-    let add_rules = crate::rules::add::add();
-    let and_rules = crate::rules::and::and();
-    let andor_rules = crate::rules::andor::andor();
-    let div_rules = crate::rules::div::div();
-    let eq_rules = crate::rules::eq::eq();
-    let ineq_rules = crate::rules::ineq::ineq();
-    let lt_rules = crate::rules::lt::lt();
-    let max_rules = crate::rules::max::max();
-    let min_rules = crate::rules::min::min();
-    let modulo_rules = crate::rules::modulo::modulo();
-    let mul_rules = crate::rules::mul::mul();
-    let not_rules = crate::rules::not::not();
-    let or_rules = crate::rules::or::or();
-    let sub_rules = crate::rules::sub::sub();
-
-    return match ruleset_class {
+    match ruleset_class {
         // Class that only contains arithmetic operations' rules
-        0 =>
-            [
-                &add_rules[..],
-                &div_rules[..],
-                &modulo_rules[..],
-                &mul_rules[..],
-                &sub_rules[..],
-            ].concat(),
-        //All the rules
-        _ => [
-            &add_rules[..],
-            &and_rules[..],
-            &andor_rules[..],
-            &div_rules[..],
-            &eq_rules[..],
-            &ineq_rules[..],
-            &lt_rules[..],
-            &max_rules[..],
-            &min_rules[..],
-            &modulo_rules[..],
-            &mul_rules[..],
-            &not_rules[..],
-            &or_rules[..],
-            &sub_rules[..],
-        ].concat()
-    };
+        0 => crate::rules::arithmetic(),
+        // All the rules
+        _ => crate::rules::all(),
+    }
 }
 
 ///Prints the egraph in an SVG file

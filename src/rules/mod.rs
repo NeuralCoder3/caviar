@@ -1,14 +1,45 @@
-pub mod add;
-pub mod and;
-pub mod andor;
-pub mod div;
-pub mod eq;
-pub mod ineq;
-pub mod lt;
-pub mod max;
-pub mod min;
-pub mod modulo;
-pub mod mul;
-pub mod not;
-pub mod or;
-pub mod sub;
+use crate::trs::{ConditionRewrite, ConstantFold, Math};
+
+type Rewrite = ConditionRewrite<Math, ConstantFold>;
+
+macro_rules! register_rules {
+    ($($module:ident),*) => {
+        $(pub mod $module;)*
+
+        pub fn all() -> Vec<Rewrite> {
+            let mut rules = Vec::new();
+            $(
+                rules.extend($module::$module());
+            )*
+            rules
+        }
+    };
+}
+
+register_rules!(
+    add,
+    and,
+    andor,
+    div,
+    eq,
+    ineq,
+    lt,
+    max,
+    min,
+    modulo,
+    mul,
+    not,
+    or,
+    sub
+);
+
+pub fn arithmetic() -> Vec<Rewrite> {
+    vec![
+        add::add(),
+        div::div(),
+        modulo::modulo(),
+        mul::mul(),
+        sub::sub(),
+    ]
+    .concat()
+}
