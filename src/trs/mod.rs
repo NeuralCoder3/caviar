@@ -264,6 +264,8 @@ pub fn compare_c0_c1(
 }
 
 
+
+
 /// Compares two constants c0 and c1
 pub fn compare_c0_c1_fun(
     // first constant
@@ -1665,6 +1667,111 @@ impl ExtendedCondition<Math, ConstantFold> for CompareC0C1Condition {
 }
 
 
+#[derive(Debug, Clone)]
+pub struct CompareCondition {
+    pub vars: Vec<Var>,
+    // pub evaluation: impl Fn(Vec<i64>) -> bool + 'static,
+    pub evaluation: fn(Vec<i64>) -> bool,
+}
+
+impl CompareCondition {
+    pub fn new(vars: Vec<&str>, evaluation: fn(Vec<i64>) -> bool) -> Self {
+        Self {
+            vars: vars.into_iter().map(|v| v.parse().unwrap()).collect(),
+            evaluation,
+        }
+    }
+}
+
+fn get_value_comb(
+    egraph: &egg::EGraph<Math, ConstantFold>, 
+    evaluation: fn(Vec<i64>) -> bool, 
+    vars: Vec<&Id>, 
+    vals: Vec<i64>
+) -> bool {
+    if vars.is_empty() {
+        return (evaluation)(vals);
+    }
+    let var = vars[0];
+    egraph[*var].nodes.iter().any(|n| match n {
+        Math::Constant(c) => {
+            let mut new_vals = vals.clone();
+            new_vals.push(*c);
+            get_value_comb(
+                egraph,
+                evaluation,
+                vars[1..].to_vec(),
+                new_vals
+            )
+        },
+        _ => false,
+    })
+}
+
+pub fn compare_fun(
+    vars: Vec<Var>,
+    evaluation: fn(Vec<i64>) -> bool,
+) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
+            move |egraph, _, subst: &Subst| {
+                let subst_vars = vars.iter().filter_map(|v| {
+                    if let Some(sv) = subst.get(*v) {
+                        Some(sv)
+                    } else {
+                        None
+                    }
+                }).collect::<Vec<_>>();
+                if subst_vars.len() != vars.len() {
+                    let not_found_vars: Vec<String> = vars.iter().filter_map(|v| {
+                        if subst.get(*v).is_none() {
+                            Some(v.to_string())
+                        } else {
+                            None
+                        }
+                    }).collect();
+                    panic!("Substitution missing variables: {:?}", not_found_vars);
+                }
+
+                get_value_comb(
+                    egraph,
+                    evaluation,
+                    subst_vars,
+                    vec![]
+                )
+
+            }
+}
+
+
+impl ExtendedCondition<Math, ConstantFold> for CompareCondition {
+    fn as_condition(&self) -> Arc<dyn Condition<Math, ConstantFold>> {
+        // Arc::new(crate::trs::compare_c0_c1_fun(self.vars[0], self.vars[1],  "custom"))
+        Arc::new(compare_fun(
+            self.vars.clone(),
+            self.evaluation,
+        ))
+    }
+
+    fn vars(&self) -> Vec<Var> {
+        self.vars.clone()
+    }
+
+    fn with_subst(&self, subst: &HashMap<Var, Var>) -> Arc<dyn ExtendedCondition<Math, ConstantFold>> {
+        let mut new_cond = self.clone();
+        for i in 0..new_cond.vars.len() {
+            if let Some(v) = subst.get(&new_cond.vars[i]) {
+                new_cond.vars[i] = v.clone();
+            }
+        }
+        Arc::new(new_cond)
+    }
+
+    fn stringify(&self) -> String {
+        format!("CompareCondition({})", self.vars.iter().map(|v| v.to_string()).collect::<Vec<String>>().join(", "))
+    }
+}
+
+
+
 
 
 pub trait ExtendedCondition<L,N>
@@ -1915,10 +2022,27 @@ pub fn prove_pulses(
             .with_node_limit(params.1)
             .with_time_limit(Duration::from_secs_f64(threshold))
             .with_expr(&expr);
+
+        cp_rules
+            .sort_by_key(|cr| {
+                let r = &cr.rewrite;
+                // let lhs_size = term_size(&r.lhs);
+                let rhs_size = term_size(&r.rhs);
+                // lhs_size + rhs_size
+                rhs_size
+            });
+        // take 1000 smallest according to size lhs+rhs
+        let picked_cp_rules = cp_rules
+            .iter()
+            // .take(1000)
+            .take(500)
+            .cloned()
+            .collect::<Vec<_>>();
+
         runner = if use_iteration_check {
-            runner_builder.run_check_iteration(rules.iter().chain(cp_rules.iter()).map(|r| &r.rewrite), &goals)
+            runner_builder.run_check_iteration(rules.iter().chain(picked_cp_rules.iter()).map(|r| &r.rewrite), &goals)
         } else {
-            runner_builder.run(rules.iter().chain(cp_rules.iter()).map(|r| &r.rewrite))
+            runner_builder.run(rules.iter().chain(picked_cp_rules.iter()).map(|r| &r.rewrite))
         };
         //Check if the expression is proved.
         id = runner.egraph.find(*runner.roots.last().unwrap());
@@ -1990,7 +2114,6 @@ pub fn prove_pulses(
             // let mut sub_applicable = std::collections::HashMap::<Id, HashSet<(Id,String, Vec<String>, Option<Arc<dyn Condition<Math, ConstantFold>>>)>>::new();
             let mut sub_applicable = std::collections::HashMap::<Id, HashSet<CpKey>>::new();
             for r in rules.iter() {
-                // TODO: handle conditional rewrites
                 // if !r.cond.is_empty() {
                 //     continue;
                 // }
