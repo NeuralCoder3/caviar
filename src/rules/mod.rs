@@ -30,7 +30,8 @@ register_rules!(
     mul,
     not,
     or,
-    sub
+    sub,
+    custom
 );
 
 pub fn arithmetic() -> Vec<Rewrite> {

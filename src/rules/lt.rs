@@ -33,12 +33,5 @@ pub fn lt() -> Vec<Rewrite> {
         // INCONSISTENT
         // rw!("lt-mul-pos-cancel"     ; "(< (* ?x ?y) ?z)"                            => "(< ?x ( / (- ( + ?z ?y ) 1 ) ?y ) )"  if crate::trs::is_const_pos("?y")),
         // rw!("lt-mul-div-cancel"     ; "(< ?y (/ ?x ?z))"                            => "( < ( - ( * ( + ?y 1 ) ?z ) 1 ) ?x )"  if crate::trs::is_const_pos("?z")),
-
-
-
-
-        // new rules
-        rw!("lt-mul"     ; "(< ?a (* ?b ( min ?c ?d)))" => "(&& (< ?a (* ?b ?c)) (< ?a (* ?b ?d)) )"  if crate::trs::is_const_pos("?b")),
-        rw!("mod-min"     ; "(% ?a ?b)" => "(min (+ ?b -1 ) (% ?a ?b))"  if crate::trs::is_const_pos("?b")),
     ]
 }

@@ -1,9 +1,8 @@
 use json::JsonValue;
 use core::panic;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
-use std::iter::{self, Map};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -184,18 +183,18 @@ pub fn all_conditions_extended(
 }
 
 
-pub fn all_conditions(
-    conds: Vec<impl Fn(&mut EGraph, Id, &Subst) -> bool>
-) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
-    move |egraph, id, subst| {
-        for cond in conds.iter() {
-            if !cond(egraph, id, subst) {
-                return false;
-            }
-        }
-        true
-    }
-}
+// pub fn all_conditions(
+//     conds: Vec<impl Fn(&mut EGraph, Id, &Subst) -> bool>
+// ) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
+//     move |egraph, id, subst| {
+//         for cond in conds.iter() {
+//             if !cond(egraph, id, subst) {
+//                 return false;
+//             }
+//         }
+//         true
+//     }
+// }
 
 pub fn is_const_pos(var: &str) -> impl ExtendedCondition<Math,ConstantFold> {
     IsConstPosCondition::new(var)
@@ -1604,11 +1603,12 @@ impl ExtendedCondition<Math, ConstantFold> for CompareC0C1Condition {
 pub struct CompareCondition {
     pub vars: Vec<Var>,
     // pub evaluation: impl Fn(Vec<i64>) -> bool + 'static,
-    pub evaluation: fn(Vec<i64>) -> bool,
+    // pub evaluation: fn(Vec<i64>) -> bool,
+    pub evaluation: fn(BTreeMap<String, i64>) -> bool,
 }
 
 impl CompareCondition {
-    pub fn new(vars: Vec<&str>, evaluation: fn(Vec<i64>) -> bool) -> Self {
+    pub fn new(vars: Vec<&str>, evaluation: fn(BTreeMap<String, i64>) -> bool) -> Self {
         Self {
             vars: vars.into_iter().map(|v| v.parse().unwrap()).collect(),
             evaluation,
@@ -1618,21 +1618,25 @@ impl CompareCondition {
 
 fn get_value_comb(
     egraph: &egg::EGraph<Math, ConstantFold>, 
-    evaluation: fn(Vec<i64>) -> bool, 
+    evaluation: fn(BTreeMap<String, i64>) -> bool, 
+    org_vars: Vec<Var>,
     vars: Vec<&Id>, 
-    vals: Vec<i64>
+    vals: Vec<(String, i64)>,
 ) -> bool {
     if vars.is_empty() {
-        return (evaluation)(vals);
+        let map : BTreeMap<String, i64> = vals.into_iter().collect();
+        return (evaluation)(map);
     }
     let var = vars[0];
+    let var_name = org_vars[0].clone();
     egraph[*var].nodes.iter().any(|n| match n {
         Math::Constant(c) => {
             let mut new_vals = vals.clone();
-            new_vals.push(*c);
+            new_vals.push((var_name.to_string(), *c));
             get_value_comb(
                 egraph,
                 evaluation,
+                org_vars[1..].to_vec(),
                 vars[1..].to_vec(),
                 new_vals
             )
@@ -1643,7 +1647,7 @@ fn get_value_comb(
 
 pub fn compare_fun(
     vars: Vec<Var>,
-    evaluation: fn(Vec<i64>) -> bool,
+    evaluation: fn(BTreeMap<String, i64>) -> bool,
 ) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
             move |egraph, _, subst: &Subst| {
                 let subst_vars = vars.iter().filter_map(|v| {
@@ -1667,6 +1671,7 @@ pub fn compare_fun(
                 get_value_comb(
                     egraph,
                     evaluation,
+                    vars.clone(),
                     subst_vars,
                     vec![]
                 )
