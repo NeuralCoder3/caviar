@@ -49,6 +49,8 @@ cargo run --release pulses data/own/pulse_50k_test2.csv 1000 5000 10 2 2>&1 | te
 
 (RUST_BACKTRACE=full SUFFIX=_p50k_r_5k_v14;cargo run --release pulses data/own/pulse_50k.csv 1000 5000 10 2 2>&1 | tee results/pulse$SUFFIX.txt; mv tmp/results_beh_2.csv tmp/results_beh_2_$SUFFIX.csv)
 
+(RUST_BACKTRACE=full SUFFIX=_p50k_r_5k_v15_all;cargo run --release pulses data/prefix/evaluation.csv 1000 5000 10 2 2>&1 | tee results/pulse$SUFFIX.txt; mv tmp/results_beh_2.csv tmp/results_beh_2_$SUFFIX.csv)
+
 
 # =COUNTIF(E:E;"=0")+COUNTIF(E:E;"=1")
 # simplify 50k r simpl 5k: 42

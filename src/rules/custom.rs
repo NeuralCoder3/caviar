@@ -27,6 +27,9 @@ pub fn custom() -> Vec<Rewrite> {
         rw!("lt-mul-const-neg"; "(< (* ?c ?x) ?k)" => "(<= ?x (/ (- ?k ?c) ?c))" if crate::trs::CompareCondition::new(vec!["?c", "?k"], |vals| vals["?c"] > 0 && vals["?k"] <= 0)),
 
         // rw!("lt-mul-const-pos"; "(< (* ?c ?x) ?k)" => "(< ?x (+ (/ ?k ?c) 1))" if crate::trs::is_const_pos("?c")), 
+
+        // TODO: we need something like this
+        // rw!("div-add-reduce"; "(/ (+ ?x ?c) ?k)" => "(+ (/ ?c ?k) (/ (+ ?x (% ?c ?k)) ?k) )" if crate::trs::CompareCondition::new(vec!["?a", "?b"], |vals| vals["?a"].abs() >= vals["?b"].abs() && vals["?b"] != 0)),
     ]
 }
 
