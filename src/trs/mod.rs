@@ -3,6 +3,7 @@ use core::panic;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
+use std::io::{BufWriter, Write};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -1605,13 +1606,22 @@ pub struct CompareCondition {
     // pub evaluation: impl Fn(Vec<i64>) -> bool + 'static,
     // pub evaluation: fn(Vec<i64>) -> bool,
     pub evaluation: fn(BTreeMap<String, i64>) -> bool,
+    // map new substed vars back to original
+    pub var_subst: BTreeMap<Var, Var>,
 }
 
 impl CompareCondition {
     pub fn new(vars: Vec<&str>, evaluation: fn(BTreeMap<String, i64>) -> bool) -> Self {
+        let vars : Vec<Var> = vars.into_iter().map(|v| v.parse().unwrap()).collect();
         Self {
-            vars: vars.into_iter().map(|v| v.parse().unwrap()).collect(),
+            vars: vars.clone(),
             evaluation,
+            var_subst: // vars -> vars
+                vars.iter()
+                .map(|v| {
+                    (v.clone(), v.clone())
+                })
+                .collect(),
         }
     }
 }
@@ -1622,6 +1632,7 @@ fn get_value_comb(
     org_vars: Vec<Var>,
     vars: Vec<&Id>, 
     vals: Vec<(String, i64)>,
+    var_subst: &BTreeMap<Var, Var>,
 ) -> bool {
     if vars.is_empty() {
         let map : BTreeMap<String, i64> = vals.into_iter().collect();
@@ -1629,25 +1640,31 @@ fn get_value_comb(
     }
     let var = vars[0];
     let var_name = org_vars[0].clone();
+    let old_var_name = var_subst.get(&var_name).unwrap();
     egraph[*var].nodes.iter().any(|n| match n {
         Math::Constant(c) => {
             let mut new_vals = vals.clone();
-            new_vals.push((var_name.to_string(), *c));
+            new_vals.push((
+                old_var_name.to_string()
+            , *c));
             get_value_comb(
                 egraph,
                 evaluation,
                 org_vars[1..].to_vec(),
                 vars[1..].to_vec(),
-                new_vals
+                new_vals,
+                var_subst
             )
         },
         _ => false,
     })
 }
 
-pub fn compare_fun(
+pub fn compare_fun<'a>(
     vars: Vec<Var>,
     evaluation: fn(BTreeMap<String, i64>) -> bool,
+    // var_subst: &'a BTreeMap<Var, Var>
+    var_subst: BTreeMap<Var, Var>
 ) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
             move |egraph, _, subst: &Subst| {
                 let subst_vars = vars.iter().filter_map(|v| {
@@ -1673,7 +1690,8 @@ pub fn compare_fun(
                     evaluation,
                     vars.clone(),
                     subst_vars,
-                    vec![]
+                    vec![],
+                    &var_subst
                 )
 
             }
@@ -1686,6 +1704,8 @@ impl ExtendedCondition<Math, ConstantFold> for CompareCondition {
         Arc::new(compare_fun(
             self.vars.clone(),
             self.evaluation,
+            // &self.var_subst
+            self.var_subst.clone()
         ))
     }
 
@@ -1695,11 +1715,44 @@ impl ExtendedCondition<Math, ConstantFold> for CompareCondition {
 
     fn with_subst(&self, subst: &HashMap<Var, Var>) -> Arc<dyn ExtendedCondition<Math, ConstantFold>> {
         let mut new_cond = self.clone();
+
+        let mut new_subst = BTreeMap::new();
+        for (old_var, new_var) in subst.iter() {
+            if !self.vars.contains(old_var) {
+                continue;
+            }
+            new_subst.insert(*new_var, *self.var_subst.get(old_var).unwrap());
+        }
+        // variables that are not substed
         for i in 0..new_cond.vars.len() {
-            if let Some(v) = subst.get(&new_cond.vars[i]) {
+            let old_var = new_cond.vars[i];
+            if subst.get(&old_var).is_none() {
+                new_subst.insert(old_var, *self.var_subst.get(&old_var).unwrap());
+            }
+        }
+
+        for i in 0..new_cond.vars.len() {
+            let old_var = new_cond.vars[i];
+            if let Some(v) = subst.get(&old_var) {
+                // // find entries in subst map where value is old_var (replaced) and set it to v
+                // assert!(!new_cond.var_subst.contains_key(v), "Substitution map has conflicting entries for variable {:?}: it was mapped via {:?} and now is {:?} which also maps to {:?}.", new_cond.var_subst.get(&old_var), old_var, v, new_cond.var_subst.get(v));
+
+                // new_cond.var_subst.insert(*v, *new_cond.var_subst.get(&old_var).unwrap());
+
+                // for (_k, val) in new_cond.var_subst.iter_mut() {
+                //     if *val == old_var {
+                //         *val = v.clone();
+                //     }
+                // }
                 new_cond.vars[i] = v.clone();
             }
         }
+
+        for v in new_cond.vars.iter() {
+            assert!(new_subst.contains_key(v), "After substitution, variable {:?} is missing from the substitution map. Full map: {:?}.", v, new_subst);
+        }
+        new_cond.var_subst = new_subst;
+
         Arc::new(new_cond)
     }
 
@@ -1892,6 +1945,124 @@ macro_rules! __rewrite2 {
 
 
 
+
+
+fn canonical_name_rewrite(rewrite: Rewrite) -> Rewrite {
+
+    // collect all variables from lhs, rhs, and conditions
+    // note: this should be equivalent to vars lhs
+    let lhs_vars = vars(&rewrite.rewrite.lhs);
+    let rhs_vars = vars(&rewrite.rewrite.rhs);
+    let condition_vars = rewrite.conditions.iter()
+        .flat_map(|c| 
+            c.vars().iter().map(|v| v.to_string()).collect::<Vec<_>>()
+        )
+        .collect::<Vec<_>>();
+    // assert that rhs and condition to now have new variables that are not in lhs
+    if !rhs_vars.iter().all(|v| lhs_vars.contains(v)) {
+        panic!("RHS has variables that are not in LHS: {:?}", rhs_vars.iter().filter(|v| !lhs_vars.contains(v)).collect::<Vec<_>>());
+    }
+    if !condition_vars.iter().all(|v| lhs_vars.contains(v)) {
+        panic!("Conditions have variables that are not in LHS: {:?}", condition_vars.iter().filter(|v| !lhs_vars.contains(v)).collect::<Vec<_>>());
+    }
+
+    let mut all_vars = 
+        lhs_vars.into_iter()
+        .chain(rhs_vars.into_iter())
+        .chain(condition_vars.into_iter())
+        .collect::<Vec<_>>();
+
+    all_vars.sort();
+    all_vars.dedup();
+
+    let subst_map : HashMap<String, String> = all_vars.iter().enumerate()
+        .map(|(i, v)| {
+            (v.clone(), format!("?v{}", i))
+        }).collect();
+    let var_subst_map : HashMap<Var, Var> = subst_map.iter()
+        .map(|(s, t)| {
+            let old_var = s.parse().unwrap();
+            let new_var = t.parse().unwrap();
+            (old_var, new_var)
+        }).collect();
+    let subst_set : SubstitutionSet = subst_map.iter()
+        .map(|(s, t)| {
+            let old_var = s.clone();
+            let new_term = parse_term(t);
+            (old_var, new_term)
+        }).collect();
+
+    let new_lhs = subst(&subst_set, &rewrite.rewrite.lhs);
+    let new_rhs = subst(&subst_set, &rewrite.rewrite.rhs);
+
+    let new_conditions = rewrite.conditions.
+        iter()
+        .map(|c| c.with_subst(&var_subst_map))
+        .collect::<Vec<_>>();
+
+    let new_lhs_pattern = Pattern::from_str(&new_lhs.to_string()).unwrap();
+    let new_rhs_pattern = Pattern::from_str(&new_rhs.to_string()).unwrap();
+
+    // println!("Canonicalizing rewrite: {}", rewrite.rewrite.name);
+    // println!("  Old LHS: {}", rewrite.rewrite.lhs);
+    // println!("  Old RHS: {}", rewrite.rewrite.rhs);
+    // println!("  New LHS: {}", new_lhs);
+    // println!("  New RHS: {}", new_rhs);
+    // println!("  Old Conditions: {}", rewrite.conditions.iter().map(|c| c.stringify()).collect::<Vec<_>>().join(", "));
+    // println!("  New Conditions: {}", new_conditions.iter().map(|c| c.stringify()).collect::<Vec<_>>().join(", "));
+    // // patterns
+    // println!("  Old LHS Pattern: {}", rewrite.rewrite.lhs);
+    // println!("  Old RHS Pattern: {}", rewrite.rewrite.rhs);
+    // println!("  New LHS Pattern: {}", new_lhs_pattern);
+    // println!("  New RHS Pattern: {}", new_rhs_pattern);
+    // // panic!("Stop after canonicalization");
+
+
+    let new_applier = ConditionalApplier {
+        condition: all_conditions_extended(new_conditions.clone()),
+        applier: new_rhs_pattern.clone()
+    };
+
+    ConditionRewrite::new_arc(
+        egg::Rewrite::new(
+            rewrite.rewrite.name,
+            // lhs: new_lhs,
+            // rhs: new_rhs,
+            new_lhs_pattern.to_string(),
+            new_rhs_pattern.to_string(),
+            new_lhs_pattern,
+            new_applier
+        ).unwrap(),
+        new_conditions
+    )
+
+    // rewrite
+    // TODO:
+    // let mut new_rewrite = rewrite.clone();
+    // new_rewrite.rewrite.name = rewrite.rewrite.name.split("::").last().unwrap().to_string();
+    // new_rewrite
+}
+
+impl Hash for Rewrite {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // condition should be unique given lhs and rhs
+        self.rewrite.name.hash(state);
+        self.rewrite.lhs.to_string().hash(state);
+        self.rewrite.rhs.to_string().hash(state);
+    }
+}
+
+impl PartialEq for Rewrite {
+    fn eq(&self, other: &Self) -> bool {
+        self.rewrite.name == other.rewrite.name
+            && self.rewrite.lhs == other.rewrite.lhs
+            && self.rewrite.rhs == other.rewrite.rhs
+    }
+}
+
+impl Eq for Rewrite { }
+
+
 // #[derive(Clone)]
 // pub struct CpKey2(pub Id, pub String, pub Vec<String>, pub Option<Arc<dyn Condition<Math, ConstantFold>>>);
 // (Id,String, Vec<String>, Option<Arc<dyn Condition<Math, ConstantFold>>>)
@@ -1952,6 +2123,8 @@ pub fn prove_pulses(
         // (Id,String, Vec<String>, Option<Arc<dyn Condition<Math, ConstantFold>>>))>::new();
     let mut rule_name_counter = 0;
 
+    // let keep_cp_rules = 500;
+    let keep_cp_rules = 75;
 
     // Run ES on each extracted expression until we reach a limit or we prove the expression.
     loop {
@@ -1969,13 +2142,23 @@ pub fn prove_pulses(
                 // lhs_size + rhs_size
                 rhs_size
             });
+
+        cp_rules = cp_rules.into_iter()
+            .map(canonical_name_rewrite)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+
         // take 1000 smallest according to size lhs+rhs
         let picked_cp_rules = cp_rules
             .iter()
-            // .take(1000)
-            .take(500)
+            .take(keep_cp_rules)
             .cloned()
             .collect::<Vec<_>>();
+
+            // if picked_cp_rules.len() > 0 {
+            //     panic!("Stop after canonicalization");
+            // }
 
         runner = if use_iteration_check {
             runner_builder.run_check_iteration(rules.iter().chain(picked_cp_rules.iter()).map(|r| &r.rewrite), &goals)
@@ -2353,6 +2536,35 @@ pub fn prove_pulses(
         StopReason::TimeLimit(time) => format!("Time Limit : {}", time),
         StopReason::Other(reason) => reason,
     };
+
+    // export cp_rules to tmp/cp_rules.txt (append if already exists)
+    {
+
+        let picked_cp_rules = cp_rules
+            .iter()
+            .take(keep_cp_rules)
+            .map(|r| 
+                r.rewrite.name().to_string()+": "+&r.rewrite.lhs.to_string()+" => "+&r.rewrite.rhs.to_string() + " with " + &format!("{:?}", r.conditions.iter().map(|c| c.stringify()).collect::<Vec<_>>())
+            )
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("tmp/cp_rules.txt")
+            .unwrap();
+        let mut writer = BufWriter::new(file);
+        writeln!(writer, "ID {}:", index).unwrap();
+        writeln!(writer, "Expression: {}", start_expression).unwrap();
+        let best_expr_str = best_expr.as_ref().map(|s| s.to_string()).unwrap_or_default();
+        writeln!(writer, "Best expression: {}", best_expr_str).unwrap();
+        writeln!(writer, "Critical Pair Rules:\n{}", picked_cp_rules).unwrap();
+        // writeln!(writer, "ID {}:", index).unwrap();
+        // writeln!(writer, "Expression: {}", start_expression).unwrap();
+        // writeln!(writer, "Best expression: {}", best_expr.clone().unwrap_or_default()).unwrap();
+        // writeln!(writer, "Critical Pair Rules:\n{}", picked_cp_rules).unwrap();
+    }
 
     ResultStructure::new(
         index,
