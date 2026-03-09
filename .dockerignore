@@ -1,0 +1,11 @@
+halide_rules
+experiments
+data
+results
+target
+tmp
+egg/.github
+egg/.idea
+egg/doc
+egg/scripts
+egg/target
