@@ -9,6 +9,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{cmp::Ordering, time::Instant};
+use rustc_hash::FxHashSet;
+use std::rc::Rc;
+use std::ptr;
 
 use colored::*;
 use egg::*;
@@ -1358,11 +1361,13 @@ macro_rules! write_npp {
 
 #[derive(Clone)]
 // pub struct CpKey(pub Id, pub String, pub Vec<String>, pub Option<Arc<dyn Condition<Math, ConstantFold>>>);
-pub struct CpKey(pub Id, pub Rewrite);
+// pub struct CpKey(pub Id, pub Rewrite);
+pub struct CpKey(pub Id, pub Rc<Rewrite>);
 
 impl PartialEq for CpKey {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0 && self.1.rewrite.name == other.1.rewrite.name
+        // self.0 == other.0 && Rc::ptr_eq(&self.1, &other.1)
     }
 }
 impl Eq for CpKey {}
@@ -1371,6 +1376,7 @@ impl Hash for CpKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.hash(state);
         self.1.rewrite.name.hash(state);
+        // ptr::hash(Rc::as_ptr(&self.1), state);
     }
 }
 
@@ -2249,34 +2255,96 @@ pub fn prove_pulses(
                 cp_rules
                 .iter()
                 .take(rules_for_cp_count)
-            ).collect::<Vec<_>>();
+            )
+            .cloned()
+            .collect::<Vec<_>>();
 
         println!("VVV: Collecting RuleApp");
         io::stdout().flush().unwrap();
 
-            // parents: for each eclass a list of classes that reference it
-            let mut parents = std::collections::HashMap::<Id, Vec<Id>>::new();
+        let max_id_usize = runner.egraph.classes()
+            .map(|c| usize::from(c.id))
+            .max()
+            .unwrap_or(0);
+
+        // 2. Use a flat vector instead of HashMap for parents
+        let mut parents: Vec<Vec<Id>> = vec![Vec::new(); max_id_usize + 1];
+
         measure_block!("collect parents", {
-            for eclass in runner.egraph.classes().map(|c| c) {
+            for eclass in runner.egraph.classes() {
                 for node in &eclass.nodes {
                     node.for_each(|child| {
-                        parents
-                            .entry(child)
-                            .or_insert_with(Vec::new)
-                            .push(eclass.id);
+                        parents[usize::from(child)].push(eclass.id);
                     });
                 }
             }
-        }); // measure
+            
+            // Deduplicate parents to avoid redundant propagation
+            for p_list in &mut parents {
+                p_list.sort_unstable();
+                p_list.dedup();
+            }
+        });
+
+            // parents: for each eclass a list of classes that reference it
+        //     let mut parents = std::collections::HashMap::<Id, Vec<Id>>::new();
+        // measure_block!("collect parents", {
+        //     for eclass in runner.egraph.classes().map(|c| c) {
+        //         for node in &eclass.nodes {
+        //             node.for_each(|child| {
+        //                 parents
+        //                     .entry(child)
+        //                     .or_insert_with(Vec::new)
+        //                     .push(eclass.id);
+        //             });
+        //         }
+        //     }
+        // }); // measure
 
 
         println!("VVV: Propagate Parents1");
         io::stdout().flush().unwrap();
-let mut sub_applicable = std::collections::HashMap::<Id, std::collections::HashSet<CpKey>>::new();
+
+
+// let mut sub_applicable = std::collections::HashMap::<Id, std::collections::HashSet<CpKey>>::new();
+
+// measure_block!("rule parents", {
+//     for r in rules_for_cp.into_iter() {
+//         let matches = r.rewrite.search(&runner.egraph);
+        
+//         let mut worklist: Vec<(Id, Id)> = matches.iter()
+//             .map(|m| (m.eclass, m.eclass)) // (current, source)
+//             .collect();
+            
+//         while let Some((current, source)) = worklist.pop() {
+            
+//             // TODO: no clone (use id/name/rc<>)
+//             let new_key = CpKey(source, r.clone()); 
+            
+//             let entry = sub_applicable
+//                 .entry(current)
+//                 .or_insert_with(std::collections::HashSet::new);
+                
+//             if entry.insert(new_key) {
+//                 if let Some(ps) = parents.get(&current) {
+//                     for p in ps {
+//                         worklist.push((*p, source));
+//                     }
+//                 }
+//             }
+//         }
+//     }
+// });
+
+let mut sub_applicable: Vec<FxHashSet<CpKey>> = vec![FxHashSet::default(); max_id_usize + 1];
 
 measure_block!("rule parents", {
     for r in rules_for_cp.into_iter() {
-        let matches = r.rewrite.search(&runner.egraph);
+        // 1. Wrap the rule in an Rc exactly once per rule
+        let rc_rule = Rc::new(r);
+        
+        // Use the rule to search the e-graph
+        let matches = rc_rule.rewrite.search(&runner.egraph);
         
         let mut worklist: Vec<(Id, Id)> = matches.iter()
             .map(|m| (m.eclass, m.eclass)) // (current, source)
@@ -2284,18 +2352,17 @@ measure_block!("rule parents", {
             
         while let Some((current, source)) = worklist.pop() {
             
-            // TODO: no clone (use id/name/rc<>)
-            let new_key = CpKey(source, r.clone()); 
+            // 2. Clone the Rc, NOT the rule! (This is just an 8-byte pointer copy + counter increment)
+            let new_key = CpKey(source, Rc::clone(&rc_rule)); 
             
-            let entry = sub_applicable
-                .entry(current)
-                .or_insert_with(std::collections::HashSet::new);
+            // O(1) array access + fast FxHashSet insert with pointer hashing
+            let is_new = sub_applicable[usize::from(current)].insert(new_key);
                 
-            if entry.insert(new_key) {
-                if let Some(ps) = parents.get(&current) {
-                    for p in ps {
-                        worklist.push((*p, source));
-                    }
+            if is_new {
+                // O(1) array access to the parents array we built earlier
+                let ps = &parents[usize::from(current)];
+                for &p in ps {
+                    worklist.push((p, source));
                 }
             }
         }
@@ -2351,9 +2418,10 @@ measure_block!("rule parents", {
         println!("VVV: Write applicable rules to file");
         io::stdout().flush().unwrap();
             writeln!(applied_rule_writer, " Iteration {}:", i).unwrap();
-        for (eclass, apps) in sub_applicable.iter() {
+        // for (eclass, apps) in sub_applicable.iter() {
+        for (eclass, apps) in sub_applicable.iter().enumerate() {
             for CpKey(src, rule) in apps.iter() {
-                if src != eclass {
+                if usize::from(*src) != eclass {
                     continue;
                 }
                 let rule_string =
@@ -2371,12 +2439,13 @@ measure_block!("rule parents", {
             // find overlaps
 measure_block!("find cp candidate", {
     // sub applicate: e class -> list of all rules applicable together with origin
-    for (eclass, apps) in sub_applicable.iter() {
+    // for (eclass, apps) in sub_applicable.iter() {
+    for (eclass, apps) in sub_applicable.iter().enumerate() {
         let mut local_apps = Vec::new();
         let mut inherited_apps = Vec::new();
         
         for app in apps {
-            if app.0 == *eclass { // app.0 is the `src` Id
+            if usize::from(app.0) == eclass { // app.0 is the `src` Id
                 local_apps.push(app);
             } else {
                 inherited_apps.push(app);
