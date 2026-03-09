@@ -274,6 +274,7 @@ fn simplify_expressions(
     results
 }
 
+#[hotpath::main]
 fn main() {
     let _args: Vec<String> = env::args().collect();
     if _args.len() > 4 {

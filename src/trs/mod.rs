@@ -1,9 +1,10 @@
+use hotpath::{measure, measure_block};
 use json::JsonValue;
 use core::panic;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
-use std::io::{BufWriter, Write};
+use std::io::{self, BufWriter, Write};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -518,7 +519,7 @@ pub fn simplify(
                 let r1 = (&rule1.rewrite.lhs,&rule1.rewrite.rhs);
                 let r2 = (&rule2.rewrite.lhs,&rule2.rewrite.rhs);
                 let cps = all_critical_pair_ref(r1, r2);
-                for (l, r, _) in cps.iter() {
+                for (l, r, _, _) in cps.iter() {
                     // TODO: not any two if can be unified (same_eq)
                     //   Critical pair between '((* ?a 1) -> ?a)' and '((* ?a ?b) -> (* ?b ?a))': (* 1 ?a_0) = ?a_0
                     //   Critical pair between '((* ?a 1) -> ?a)' and '((* ?a ?b) -> (* ?b ?a))': ?a = (* 1 ?a)
@@ -2069,6 +2070,7 @@ impl Eq for Rewrite { }
 
 /// Prove an expression to true or false by using the Pulsing Caviar heuristic.
 #[allow(dead_code)]
+#[measure]
 pub fn prove_pulses(
     index: i32,
     start_expression: &str,
@@ -2123,8 +2125,27 @@ pub fn prove_pulses(
         // (Id,String, Vec<String>, Option<Arc<dyn Condition<Math, ConstantFold>>>))>::new();
     let mut rule_name_counter = 0;
 
-    // let keep_cp_rules = 500;
+    // let keep_cp_rules = 100;
+    // let keep_cp_rules = 1000;
+    // let keep_cp_rules = 0;
     let keep_cp_rules = 75;
+    // let keep_cp_rules = 100;
+    // let keep_cp_rules = 50;
+    let rules_for_cp_count = 10;
+    // let keep_cp_rules = 200;
+
+    let applied_rule_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("tmp/applied_rules.txt")
+        .unwrap();
+    let mut applied_rule_writer = BufWriter::new(applied_rule_file);
+    {
+        writeln!(applied_rule_writer, "ID {}:", index).unwrap();
+        writeln!(applied_rule_writer, "Expression: {}", start_expression).unwrap();
+    }
+
+
 
     // Run ES on each extracted expression until we reach a limit or we prove the expression.
     loop {
@@ -2160,11 +2181,17 @@ pub fn prove_pulses(
             //     panic!("Stop after canonicalization");
             // }
 
+        let all_rules = rules.iter().chain(picked_cp_rules.iter()).collect::<Vec<_>>();
+
+        println!("VVV: Running EGraph");
+        io::stdout().flush().unwrap();
+        measure_block!("egraph", {
         runner = if use_iteration_check {
-            runner_builder.run_check_iteration(rules.iter().chain(picked_cp_rules.iter()).map(|r| &r.rewrite), &goals)
+            runner_builder.run_check_iteration(all_rules.iter().map(|r| &r.rewrite), &goals)
         } else {
-            runner_builder.run(rules.iter().chain(picked_cp_rules.iter()).map(|r| &r.rewrite))
+            runner_builder.run(all_rules.iter().map(|r| &r.rewrite))
         };
+        }); // measure
         //Check if the expression is proved.
         id = runner.egraph.find(*runner.roots.last().unwrap());
         for (goal_index, goal) in goals.iter().enumerate() {
@@ -2175,6 +2202,8 @@ pub fn prove_pulses(
                 break;
             }
         }
+        println!("VVV: Finished EGraph");
+        io::stdout().flush().unwrap();
 
         //If we saturate then the expression is unprovable using our ruleset.
         let saturated = match &runner.stop_reason.as_ref().unwrap() {
@@ -2192,14 +2221,17 @@ pub fn prove_pulses(
 
         //Extract the best expression from the egraph.
         let mut extractor;
+        let extraction_time;
+        measure_block!("extraction", {
         extractor = Extractor::new(&((&runner).egraph), AstDepth);
 
         //Calculate the extraction time.
         let now = Instant::now();
         let (_, best_exprr) = extractor.find_best(id);
-        let extraction_time = now.elapsed().as_secs_f64();
+        extraction_time = now.elapsed().as_secs_f64();
         expr = best_exprr;
         total_time += extraction_time;
+        }); // measure
         if report {
             println!(
                 "Starting pass {} with Expr: {} in {}",
@@ -2212,12 +2244,19 @@ pub fn prove_pulses(
 
 
 
+        let rules_for_cp = 
+            rules.iter().chain(
+                cp_rules
+                .iter()
+                .take(rules_for_cp_count)
+            ).collect::<Vec<_>>();
 
-
-
+        println!("VVV: Collecting RuleApp");
+        io::stdout().flush().unwrap();
 
             // parents: for each eclass a list of classes that reference it
             let mut parents = std::collections::HashMap::<Id, Vec<Id>>::new();
+        measure_block!("collect parents", {
             for eclass in runner.egraph.classes().map(|c| c) {
                 for node in &eclass.nodes {
                     node.for_each(|child| {
@@ -2228,78 +2267,211 @@ pub fn prove_pulses(
                     });
                 }
             }
+        }); // measure
 
+
+        println!("VVV: Propagate Parents1");
+        io::stdout().flush().unwrap();
+let mut sub_applicable = std::collections::HashMap::<Id, std::collections::HashSet<CpKey>>::new();
+
+measure_block!("rule parents", {
+    for r in rules_for_cp.into_iter() {
+        let matches = r.rewrite.search(&runner.egraph);
+        
+        let mut worklist: Vec<(Id, Id)> = matches.iter()
+            .map(|m| (m.eclass, m.eclass)) // (current, source)
+            .collect();
+            
+        while let Some((current, source)) = worklist.pop() {
+            
+            // TODO: no clone (use id/name/rc<>)
+            let new_key = CpKey(source, r.clone()); 
+            
+            let entry = sub_applicable
+                .entry(current)
+                .or_insert_with(std::collections::HashSet::new);
+                
+            if entry.insert(new_key) {
+                if let Some(ps) = parents.get(&current) {
+                    for p in ps {
+                        worklist.push((*p, source));
+                    }
+                }
+            }
+        }
+    }
+});
 
 
             // propagate upwards, eclass -> application point, rule, and condition
             // let mut sub_applicable = std::collections::HashMap::<Id, HashSet<(Id,String, Vec<String>, Option<Arc<dyn Condition<Math, ConstantFold>>>)>>::new();
-            let mut sub_applicable = std::collections::HashMap::<Id, HashSet<CpKey>>::new();
-            for r in rules.iter() {
-                // if !r.cond.is_empty() {
-                //     continue;
-                // }
-                let matches = r.rewrite.search(&runner.egraph);
-                // eclasses where the rule applies
-                let mut worklist = matches.iter()
-                    .map(|m| m.eclass)
-                    .map(|id| (id, id)) // (current, source)
-                    .collect::<HashSet<_>>();
-                while !worklist.is_empty() {
-                    let (current, source) = worklist.iter().next().unwrap().clone();
-                    worklist.remove(&(current, source));
-                    let entry = sub_applicable
-                        .entry(current)
-                        .or_insert_with(HashSet::new);
-                    if entry.insert(CpKey(source, r.clone())) {
-                        // only continue when freshly inserted => terminate at the latest after every eclass has been visited once
-                        if let Some(ps) = parents.get(&current) {
-                            for p in ps {
-                                worklist.insert((*p, source));
-                            }
-                        }
-                    }
+            // let mut sub_applicable = std::collections::HashMap::<Id, HashSet<CpKey>>::new();
+        //     let mut sub_applicable = std::collections::HashMap::<Id, Vec<CpKey>>::new();
+        // measure_block!("rule parents", {
+        //     for r in rules_for_cp.into_iter() {
+        //     // for r in rules.clone().into_iter() {
+        //         // if !r.cond.is_empty() {
+        //         //     continue;
+        //         // }
+        //         let matches = r.rewrite.search(&runner.egraph);
+        //         // eclasses where the rule applies
+        //         let mut worklist = matches.iter()
+        //             .map(|m| m.eclass)
+        //             .map(|id| (id, id)) // (current, source)
+        //             .collect::<HashSet<_>>();
+        //         while !worklist.is_empty() {
+        //             let (current, source) = worklist.iter().next().unwrap().clone();
+        //             worklist.remove(&(current, source));
+        //             let entry = sub_applicable
+        //                 .entry(current)
+        //                 // .or_insert_with(HashSet::new);
+        //                 .or_insert_with(Vec::new);
+        //             let new_key = CpKey(source, r.clone());
+        //             let fresh = !entry.iter().any(|c| c == &new_key);
+        //             if fresh {
+        //                 entry.push(new_key);
+        //                 if let Some(ps) = parents.get(&current) {
+        //                     for p in ps {
+        //                         worklist.insert((*p, source));
+        //                     }
+        //                 }
+        //             }
+        //             // if entry.insert(CpKey(source, r.clone())) {
+        //             //     // only continue when freshly inserted => terminate at the latest after every eclass has been visited once
+        //             //     if let Some(ps) = parents.get(&current) {
+        //             //         for p in ps {
+        //             //             worklist.insert((*p, source));
+        //             //         }
+        //             //     }
+        //             // }
+        //         }
+        //     }
+        // }); // measure
+
+        println!("VVV: Write applicable rules to file");
+        io::stdout().flush().unwrap();
+            writeln!(applied_rule_writer, " Iteration {}:", i).unwrap();
+        for (eclass, apps) in sub_applicable.iter() {
+            for CpKey(src, rule) in apps.iter() {
+                if src != eclass {
+                    continue;
                 }
+                let rule_string =
+                    rule.rewrite.name.clone() + ": " + &rule.rewrite.lhs.to_string() + " => " + &rule.rewrite.rhs.to_string() + " with " + &format!("{:?}", rule.conditions.iter().map(|c| c.stringify()).collect::<Vec<_>>());
+                writeln!(applied_rule_writer, "  EClass {}: applied rule {}", eclass, rule_string).unwrap();
             }
+        }
+
+
+        println!("VVV: Propagate Parents2");
+        io::stdout().flush().unwrap();
 
             // only propagate up to either other node => intersection only at one of the rules
             // at class c, get all pairs and take these that have one component be c
             // find overlaps
-            for (eclass, apps) in sub_applicable.iter() {
-                let apps_vec = apps.iter().collect::<Vec<_>>();
-                for i in 0..apps_vec.len() {
-                    for j in (i + 1)..apps_vec.len() {
-                        let CpKey(src_i, rule_i) = apps_vec[i];
-                        let CpKey(src_j, rule_j) = apps_vec[j];
-                        if src_i != eclass && src_j != eclass {
-                            continue;
-                        }
-                        let name_i = rule_i.rewrite.name();
-                        let name_j = rule_j.rewrite.name();
-                        // sorted tuple in critical pairs
-                        let pair = if name_i < name_j {
-                            (name_i.to_string(), name_j.to_string())
-                        } else {
-                            (name_j.to_string(), name_i.to_string())
-                        };
-                        if critical_pairs_set.insert(pair) {
-                            let cp_count = critical_pairs_set.len();
-                            critical_pairs.insert((cp_count.to_string(), CpKey(*src_i, rule_i.clone()), CpKey(*src_j, rule_j.clone())));
-                            // println!(
-                            //     "Overlap found in eclass {}: rules '{}' and '{}' (from eclasses {} and {})",
-                            //     eclass, rule_i, rule_j, src_i, src_j
-                            // );
-                        }
-                        // println!(
-                        //     "Overlap found in eclass {}: rules '{}' and '{}' (from eclasses {} and {})",
-                        //     eclass, rule_i, rule_j, src_i, src_j
-                        // );
-                    }
-                }
+measure_block!("find cp candidate", {
+    // sub applicate: e class -> list of all rules applicable together with origin
+    for (eclass, apps) in sub_applicable.iter() {
+        let mut local_apps = Vec::new();
+        let mut inherited_apps = Vec::new();
+        
+        for app in apps {
+            if app.0 == *eclass { // app.0 is the `src` Id
+                local_apps.push(app);
+            } else {
+                inherited_apps.push(app);
             }
+        }
+
+        let mut process_pair = |app_i: &CpKey, app_j: &CpKey| {
+            let CpKey(src_i, rule_i) = app_i;
+            let CpKey(src_j, rule_j) = app_j;
+            
+            let name_i = rule_i.rewrite.name();
+            let name_j = rule_j.rewrite.name();
+            
+            let pair = if name_i < name_j {
+                // (name_i, name_j) 
+                (name_i.to_string(), name_j.to_string())
+            } else {
+                // (name_j, name_i)
+                (name_j.to_string(), name_i.to_string())
+            };
+            
+            if critical_pairs_set.insert(pair) {
+                let cp_count = critical_pairs_set.len();
+                // TODO: usize not string for name
+                // TODO: use Rc for key to avoid clone
+                critical_pairs.insert((
+                    // cp_count, 
+                    cp_count.to_string(),
+                    CpKey(*src_i, rule_i.clone()), 
+                    CpKey(*src_j, rule_j.clone())
+                ));
+            }
+        };
+
+        for i in 0..local_apps.len() {
+            for j in (i + 1)..local_apps.len() {
+                process_pair(local_apps[i], local_apps[j]);
+            }
+        }
+
+        for local in &local_apps {
+            for inherited in &inherited_apps {
+                process_pair(local, inherited);
+            }
+        }
+    }
+});
+
+        // measure_block!("find cp candidate", {
+        //     for (eclass, apps) in sub_applicable.iter() {
+        //         // let apps_vec = apps.iter().collect::<Vec<_>>();
+        //         let apps = apps.iter().collect::<Vec<_>>();
+        //         for i in 0..apps.len() {
+        //             for j in (i + 1)..apps.len() {
+        //         // for i in 0..apps_vec.len() {
+        //         //     for j in (i + 1)..apps_vec.len() {
+        //                 let CpKey(src_i, rule_i) = &apps[i];
+        //                 let CpKey(src_j, rule_j) = &apps[j];
+        //                 // let CpKey(src_i, rule_i) = apps_vec[i];
+        //                 // let CpKey(src_j, rule_j) = apps_vec[j];
+        //                 if src_i != eclass && src_j != eclass {
+        //                     continue;
+        //                 }
+        //                 let name_i = rule_i.rewrite.name();
+        //                 let name_j = rule_j.rewrite.name();
+        //                 // sorted tuple in critical pairs
+        //                 let pair = if name_i < name_j {
+        //                     (name_i.to_string(), name_j.to_string())
+        //                 } else {
+        //                     (name_j.to_string(), name_i.to_string())
+        //                 };
+        //                 if critical_pairs_set.insert(pair) {
+        //                     let cp_count = critical_pairs_set.len();
+        //                     critical_pairs.insert((cp_count.to_string(), CpKey(*src_i, rule_i.clone()), CpKey(*src_j, rule_j.clone())));
+        //                     // println!(
+        //                     //     "Overlap found in eclass {}: rules '{}' and '{}' (from eclasses {} and {})",
+        //                     //     eclass, rule_i, rule_j, src_i, src_j
+        //                     // );
+        //                 }
+        //                 // println!(
+        //                 //     "Overlap found in eclass {}: rules '{}' and '{}' (from eclasses {} and {})",
+        //                 //     eclass, rule_i, rule_j, src_i, src_j
+        //                 // );
+        //             }
+        //         }
+        //     }
+        // }); // measure
+
+
+        println!("VVV: Compute CP");
+        io::stdout().flush().unwrap();
 
             // TODO: only critical pair overlap at correct positions not all
             // TODO: only critical pair that were used in e-graph (at node) (custom applier)
-
+        measure_block!("compute cp", {
             for (_cp_name, CpKey(_src1, rule1), CpKey(_src2, rule2)) in critical_pairs.iter() {
                 // let rule1 = rules.iter().find(|r| r.rewrite.name() == *r1).unwrap();
                 // let rule2 = rules.iter().find(|r| r.rewrite.name() == *r2).unwrap();
@@ -2307,7 +2479,7 @@ pub fn prove_pulses(
                 let r2 = (&rule2.rewrite.lhs,&rule2.rewrite.rhs);
                 // TODO: subst of critical_pair_parts ignored => variable condition might become subterm condition
                 let cps = all_critical_pair_ref(r1, r2);
-                for (l, r, r_subst) in cps.iter() {
+                for (l, r, unifier, r_subst_org) in cps.iter() {
                     // TODO: not any two if can be unified (same_eq)
                     //   Critical pair between '((* ?a 1) -> ?a)' and '((* ?a ?b) -> (* ?b ?a))': (* 1 ?a_0) = ?a_0
                     //   Critical pair between '((* ?a 1) -> ?a)' and '((* ?a ?b) -> (* ?b ?a))': ?a = (* 1 ?a)
@@ -2320,6 +2492,28 @@ pub fn prove_pulses(
                     // );
                     // add critical pair as rewrite rule
                     // consider both direction but only if no new variable are introduced
+
+                    let r_subst = r_subst_org.iter().cloned().chain(
+                        unifier.iter().filter_map(|(k,v)| {
+                            if let Term::Var(var) = v {
+                                // if k is rhs of r_subst_org use lhs instead
+                                // let k_prime = r_subst_org.iter().find_map(|(k2,v2)| {
+                                //     if v2 == k {
+                                //         Some(k2)
+                                //     } else {
+                                //         None
+                                //     }
+                                // }).unwrap_or(k);
+                                let k_prime = k;
+                                Some((k_prime.clone(), var.to_string()))
+                            } else {
+                                None
+                            }
+                        })
+                        // r_subst_org.iter()
+                    ).collect::<Vec<_>>();
+
+
                     let var_l = vars(l);
                     let var_r = vars(r);
                     fn is_var(t: &Term) -> bool {
@@ -2359,8 +2553,10 @@ pub fn prove_pulses(
                         // cnew
                         c.with_subst(&r_subst_map)
                     }).collect::<Vec<_>>();
+                    let r1_conds = rule1.conditions.iter().map(|c| { c.with_subst(&r_subst_map) }).collect::<Vec<_>>();
                     let conds = 
-                        rule1.conditions.iter()
+                        // rule1.conditions.iter()
+                        r1_conds.iter()
                         // .chain(rule2.conditions.iter())
                         .chain(r2_conds.iter())
                         .map(|c| {
@@ -2385,11 +2581,23 @@ pub fn prove_pulses(
                     // is there a condition variable that does not occur in the rule?
                     if condvars.iter().any(|v| !var_l.contains(v) && !var_r.contains(v)) {
                         println!(
-                            "Skipping CP rule {}: {} -> {} because condition variable(s) {:?} do not occur in the rule",
+                            "Skipping CP rule {}: {} -> {} because condition variable(s) {:?} do not occur in the rule ({})",
                             cp_name_lr,
                             l,
                             r,
-                            condvars.iter().filter(|v| !var_l.contains(v) && !var_r.contains(v)).collect::<Vec<_>>()
+                            condvars.iter().filter(|v| !var_l.contains(v) && !var_r.contains(v)).collect::<Vec<_>>(),
+                            condsstr
+                        );
+                        println!(
+                            "  R1: {} -> {} (conds: {:?})\n  R2: {} -> {} (conds: {:?})\n  Rename subst: {:?}\n  Unification: {:?}",
+                            rule1.rewrite.lhs,
+                            rule1.rewrite.rhs,
+                            rule1.conditions.iter().map(|c| c.stringify()).collect::<Vec<_>>(),
+                            rule2.rewrite.lhs,
+                            rule2.rewrite.rhs,
+                            rule2.conditions.iter().map(|c| c.stringify()).collect::<Vec<_>>(),
+                            r_subst_org,
+                            unifier.iter().map(|(k,v)| (k.to_string(), v.to_string())).collect::<Vec<_>>()
                         );
                         // panic!();
                         continue;
@@ -2482,6 +2690,7 @@ pub fn prove_pulses(
                     }
                 }
             }
+        }); // measure
 
 
 
@@ -2539,7 +2748,6 @@ pub fn prove_pulses(
 
     // export cp_rules to tmp/cp_rules.txt (append if already exists)
     {
-
         let picked_cp_rules = cp_rules
             .iter()
             .take(keep_cp_rules)
