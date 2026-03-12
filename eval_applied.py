@@ -5,7 +5,8 @@ from tqdm import tqdm
 
 # file = "tmp/applied_rules_p50k_r_5k_v32.txt"
 # file = "tmp/applied_rules_p50k_r_5k_v49.txt"
-file = "tmp/applied_rules_p50k_r_5k_v52.txt"
+# file = "tmp/applied_rules_p50k_r_5k_v52.txt"
+file = "tmp/applied_rules_v1008.txt"
 
 # split ad ID \d+:
 with open(file, "r") as f:
