@@ -21,3 +21,10 @@ num-traits = "0.2.14"
 rand = "0.8.0"
 json = "*"
 rayon = "1.5"
+hotpath = "0.13"
+rustc-hash = "2.1.1"
+
+
+[features]
+hotpath = ["hotpath/hotpath"]
+hotpath-alloc = ["hotpath/hotpath-alloc"]
