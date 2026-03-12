@@ -48,13 +48,16 @@ RUST_BACKTRACE=full cargo run --release pulses data/own/pulse_50k.csv 1000 5000 
 cargo run --release pulses data/own/pulse_50k_test2.csv 1000 5000 10 2 2>&1 | tee results/test.txt
 
 # (RUST_BACKTRACE=full SUFFIX=_p50k_r_5k_v26;rm -f tmp/cp_rules.txt;cargo run --release pulses data/own/pulse_50k.csv 1000 5000 10 2 2>&1 | tee results/pulse$SUFFIX.txt; mv tmp/results_beh_2.csv tmp/results_beh_2_$SUFFIX.csv;mv tmp/cp_rules.txt tmp/cp_rules$SUFFIX.txt)
-(RUST_BACKTRACE=full SUFFIX=_p50k_r_5k_v54;rm -f tmp/cp_rules.txt tmp/applied_rules.txt;cargo run --release --features='hotpath,hotpath-alloc' pulses data/own/pulse_50k.csv 1000 5000 10 2 2>&1 | tee results/pulse$SUFFIX.txt; mv tmp/results_beh_2.csv tmp/results_beh_2_$SUFFIX.csv;mv tmp/cp_rules.txt tmp/cp_rules$SUFFIX.txt;mv tmp/applied_rules.txt tmp/applied_rules$SUFFIX.txt)
+# (RUST_BACKTRACE=full SUFFIX=_p50k_r_5k_v66;rm -f tmp/cp_rules.txt tmp/applied_rules.txt;cargo run --release --features='hotpath,hotpath-alloc' pulses data/own/pulse_50k.csv 1000 5000 10 2 2>&1 | tee results/pulse$SUFFIX.txt; mv tmp/results_beh_2.csv tmp/results_beh_2_$SUFFIX.csv;mv tmp/cp_rules.txt tmp/cp_rules$SUFFIX.txt;mv tmp/applied_rules.txt tmp/applied_rules$SUFFIX.txt)
 # cargo run --features='hotpath,hotpath-alloc'
 
 # (RUST_BACKTRACE=full SUFFIX=_p50k_r_5k_v15_all;cargo run --release pulses data/prefix/evaluation.csv 1000 5000 10 2 2>&1 | tee results/pulse$SUFFIX.txt; mv tmp/results_beh_2.csv tmp/results_beh_2_$SUFFIX.csv)
 
+(RUST_BACKTRACE=full SUFFIX=_v80;rm -f tmp/cp_rules.txt tmp/applied_rules.txt;cargo run --release --features='hotpath,hotpath-alloc' pulses data/own/pulse_50k.csv 1000 5000 10 2 2>&1 | tee results/pulse$SUFFIX.txt | grep Start; mv tmp/results_beh_2.csv tmp/results$SUFFIX.csv;mv tmp/cp_rules.txt tmp/cp_rules$SUFFIX.txt;mv tmp/applied_rules.txt tmp/applied_rules$SUFFIX.txt)
+cargo build --release --features='hotpath,hotpath-alloc'
 
 # =COUNTIF(E:E;"=0")+COUNTIF(E:E;"=1")
+# or ./check.sh v70
 # simplify 50k r simpl 5k: 42
 # simplify 50k r simpl 50k: 73
 # pulse 50k r pulse 5k: 0
@@ -113,9 +116,35 @@ hashset vs vec
 54=49: all_rules 75_10cp, custom, (timing): 38
 56=49: all_rules 75_10cp, custom, (timing): --
 60: all_rules 75_10cp, custom, cp condition replace, (timing): 60
+61: 60+rc rules: 50
+62=60: 62
+63 = 61: 57
+64 no custom: 36
+65 no custom: ---
+66 no custom: 37
+67 15k (instead of 5k): ---
+69 10k (instead of 5k): 58
+70 15k (instead of 5k): 73
+71 5k, 4s (per 2s iterations) = 2 rounds (instead of 5): 23
+72 5k, 10s (per 2s iterations) = 5 rounds: 33
+73 5k, 10s (per 3s iterations) = 3-4 rounds: 29
+74 5k, 10s (per 1s iterations) = 10 rounds: 50
+75 5k, 20s (per 2s iterations) = 10 rounds: 48
+1008 50k 10s, 2s iter: 95
+1011 50k 10s, 1s iter: 104
 
+76, check inconsistency: (found 663 correct 0 sometimes (with 5 0 cp))
+77, check inconsistency: (found 663 incorrect 1 sometimes (with 5 0 cp))
+78, check inconsistency: (found 663 simpl incorrect 1 sometimes (with 5 0 cp))
+
+# take rules both sided for cps / check in egraph
+# take more rules for larger nodes (instead of 75_10)
 
 cd ~/Documents/Projekte/synthesis/kbe_2.0/caviar_iter/results
 grep "Start" results/pulse_p50k_r_5k_v53.txt
 
 
+# cat results/pulse_v1008.txt | grep Start | tail -n 1
+
+
+(RUST_BACKTRACE=full SUFFIX=_v79;rm -f tmp/cp_rules.txt tmp/applied_rules.txt;cargo run --release --features='hotpath,hotpath-alloc' pulses data/own/pulse_50k_cut1.csv 1000 5000 10 2 2>&1 | tee results/pulse$SUFFIX.txt | grep Start; mv tmp/results_beh_2.csv tmp/results$SUFFIX.csv;mv tmp/cp_rules.txt tmp/cp_rules$SUFFIX.txt;mv tmp/applied_rules.txt tmp/applied_rules$SUFFIX.txt) && ./check.sh v79
